@@ -1,0 +1,15 @@
+{
+  "appId": "io.github.leogbtech.echo",
+  "appName": "Écho",
+  "webDir": "www",
+  "backgroundColor": "#ffffff",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": true,
+    "allowsLinkPreview": false,
+    "backgroundColor": "#ffffff"
+  },
+  "android": {
+    "backgroundColor": "#ffffff"
+  }
+}

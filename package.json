@@ -1,0 +1,19 @@
+{
+  "name": "echo-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Écho — ta musique, partout (app iPhone / Android)",
+  "scripts": {
+    "www": "rm -rf www && cp -r web www",
+    "sync": "npm run www && npx cap sync"
+  },
+  "dependencies": {
+    "@capacitor/android": "6.2.2",
+    "@capacitor/core": "6.2.2",
+    "@capacitor/ios": "6.2.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "6.2.2"
+  }
+}

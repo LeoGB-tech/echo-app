@@ -1,0 +1,131 @@
+# Écho — fabrique l'app iPhone (.ipa), l'app Android (.apk), puis publie ton store perso.
+# Se lance tout seul à chaque envoi sur la branche main (ou à la main : Actions → Build → Run workflow).
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build
+  cancel-in-progress: true
+
+env:
+  VERSION: 1.0.${{ github.run_number }}
+
+jobs:
+  ios:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Dépendances
+        run: npm install --no-audit --no-fund
+      - name: Projet iOS
+        run: |
+          npm run www
+          npx cap add ios
+          npx @capacitor/assets generate --ios --iconBackgroundColor '#ffffff' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#000000'
+          npx cap sync ios
+      - name: Réglages (lecture en arrière-plan, nom)
+        run: |
+          P=ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Delete :UIBackgroundModes" "$P" || true
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$P"
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$P"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Écho" "$P" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Écho" "$P"
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$P" || true
+      - name: Compilation (non signée — signée ensuite sur ton PC par SideStore / Sideloadly)
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="${{ github.run_number }}" | tail -n 40
+          mkdir -p Payload
+          cp -R "$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app" Payload/
+          zip -qry Echo.ipa Payload
+          ls -la Echo.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipa
+          path: Echo.ipa
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Dépendances
+        run: npm install --no-audit --no-fund
+      - name: Projet Android
+        run: |
+          npm run www
+          npx cap add android
+          npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#000000'
+          npx cap sync android
+      - name: Compilation
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon -q
+          cp app/build/outputs/apk/debug/app-debug.apk ../Echo.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: Echo.apk
+
+  release:
+    needs: [ios, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Écho ${{ env.VERSION }}
+          body: "iPhone : Echo.ipa (via SideStore / AltStore / Sideloadly) · Android : Echo.apk"
+          files: |
+            Echo.ipa
+            Echo.apk
+
+  store:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Store perso + version web
+        env:
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: node scripts/make-store.mjs
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
