@@ -32,6 +32,7 @@ jobs:
       - name: Projet iOS
         run: |
           npm run www
+          mkdir -p assets && cp icon-only.png splash.png splash-dark.png assets/
           npx cap add ios
           npx @capacitor/assets generate --ios --iconBackgroundColor '#ffffff' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#000000'
           npx cap sync ios
@@ -75,6 +76,7 @@ jobs:
       - name: Projet Android
         run: |
           npm run www
+          mkdir -p assets && cp icon-only.png splash.png splash-dark.png assets/
           npx cap add android
           npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#000000'
           npx cap sync android
@@ -123,7 +125,7 @@ jobs:
         env:
           REPO: ${{ github.repository }}
           OWNER: ${{ github.repository_owner }}
-        run: node scripts/make-store.mjs
+        run: node make-store.mjs
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

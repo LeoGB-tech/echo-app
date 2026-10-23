@@ -10,8 +10,8 @@ const today = new Date().toISOString().slice(0, 10);
 
 fs.rmSync("_site", { recursive: true, force: true });
 fs.mkdirSync("_site/app", { recursive: true });
-fs.cpSync("web", "_site/app", { recursive: true });
-fs.copyFileSync("store/icon.png", "_site/icon.png");
+for (const f of ["index.html","sw.js","manifest.webmanifest","icon.svg","icon-180.png","icon-192.png","icon-512.png"]) fs.copyFileSync(f, "_site/app/" + f);
+fs.copyFileSync("icon.png", "_site/icon.png");
 
 const source = {
   name: "Store de Leo",
@@ -47,7 +47,7 @@ const source = {
 };
 fs.writeFileSync("_site/apps.json", JSON.stringify(source, null, 2));
 
-const page = fs.readFileSync("store/index.html", "utf8")
+const page = fs.readFileSync("store.html", "utf8")
   .replaceAll("{{VERSION}}", VERSION)
   .replaceAll("{{DATE}}", new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" }))
   .replaceAll("{{IPA_URL}}", `${rel}/Echo.ipa`)

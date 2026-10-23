@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Store de Leo</title>
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+:root{--bg:#f2f2f7;--card:#fff;--text:#000;--dim:rgba(60,60,67,.62);--line:rgba(60,60,67,.16);--a:#fa2d48;--btn:#f2f2f7}
+@media (prefers-color-scheme: dark){:root{--bg:#000;--card:#1c1c1e;--text:#fff;--dim:rgba(235,235,245,.6);--line:rgba(84,84,88,.6);--btn:#2c2c2e}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:16px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;padding:calc(20px + env(safe-area-inset-top)) 16px calc(40px + env(safe-area-inset-bottom))}
+main{max-width:640px;margin:0 auto}
+h1{font-size:34px;font-weight:700;letter-spacing:.005em}
+.sub{color:var(--dim);margin:2px 0 22px}
+.card{background:var(--card);border-radius:16px;padding:18px;margin-bottom:16px}
+.app{display:flex;gap:16px;align-items:center}
+.app img{width:96px;height:96px;border-radius:22px;border:.5px solid var(--line)}
+.app h2{font-size:22px;font-weight:700}
+.app p{color:var(--dim);font-size:14px}
+.get{display:inline-block;margin-top:8px;background:var(--a);color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:6px 18px;border-radius:999px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;border-top:.5px solid var(--line);text-decoration:none;color:var(--text)}
+.row:first-of-type{border-top:0}
+.row b{font-weight:500}
+.row small{display:block;color:var(--dim);font-size:13px}
+.row span{background:var(--btn);color:var(--a);font-weight:600;font-size:14px;padding:6px 14px;border-radius:999px;white-space:nowrap}
+h3{font-size:20px;font-weight:700;margin:26px 0 10px}
+ol{padding-left:20px}
+li{margin:6px 0;color:var(--text)}
+li small{color:var(--dim)}
+code{background:var(--btn);padding:2px 6px;border-radius:6px;font-size:13px;word-break:break-all}
+.foot{color:var(--dim);font-size:13px;text-align:center;margin-top:28px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Store de Leo</h1>
+  <p class="sub">Mes apps, à installer sur iPhone et Android</p>
+
+  <div class="card">
+    <div class="app">
+      <img src="icon.png" alt="">
+      <div>
+        <h2>Écho</h2>
+        <p>Ta musique, partout · version {{VERSION}} · {{DATE}}</p>
+        <a class="get" href="sidestore://source?url={{SOURCE_URL}}" data-app="SideStore">Obtenir</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <a class="row" href="sidestore://source?url={{SOURCE_URL}}" data-app="SideStore"><div><b>Ajouter à SideStore</b><small>Installe et met à jour Écho tout seul</small></div><span>Ouvrir</span></a>
+    <a class="row" href="altstore://source?url={{SOURCE_URL}}" data-app="AltStore"><div><b>Ajouter à AltStore</b><small>Même chose avec AltStore</small></div><span>Ouvrir</span></a>
+    <a class="row" href="{{IPA_URL}}"><div><b>Fichier iPhone (.ipa)</b><small>Pour Sideloadly sur PC · {{IPA_MB}} Mo</small></div><span>Télécharger</span></a>
+    <a class="row" href="{{APK_URL}}"><div><b>App Android (.apk)</b><small>{{APK_MB}} Mo</small></div><span>Télécharger</span></a>
+    <a class="row" href="{{WEB_URL}}"><div><b>Version web</b><small>Sans installation · notifications sur l'écran d'accueil</small></div><span>Ouvrir</span></a>
+  </div>
+
+  <div class="card" id="help" style="display:none;border:2px solid var(--a)"></div>
+  <div class="card">
+    <a class="row" href="#" id="copy"><div><b>Copier l'adresse de la source</b><small>À coller dans SideStore / AltStore → Sources → +</small></div><span>Copier</span></a>
+  </div>
+
+  <h3>Installer sur iPhone</h3>
+  <div class="card">
+    <p style="font-weight:600;margin-bottom:6px">Avec Sideloadly (le plus simple, depuis le PC)</p>
+    <ol>
+      <li>Installe <b>Sideloadly</b> et <b>iTunes</b> (version du site d'Apple) sur ton PC.</li>
+      <li>Branche ton iPhone en USB, télécharge le fichier <b>.ipa</b> ci-dessus.</li>
+      <li>Glisse le .ipa dans Sideloadly, mets ton identifiant Apple, clique <b>Start</b>.</li>
+      <li>Sur l'iPhone : <b>Réglages → Général → VPN et gestion de l'appareil</b> → fais confiance à ton identifiant.</li>
+      <li>Active le <b>mode développeur</b> si l'iPhone le demande (Réglages → Confidentialité et sécurité).</li>
+    </ol>
+    <p style="font-weight:600;margin:16px 0 6px">Avec SideStore (mises à jour automatiques)</p>
+    <ol>
+      <li>Installe SideStore une fois (guide sur sidestore.io, avec le PC).</li>
+      <li>Sur l'iPhone, touche <b>Ajouter à SideStore</b> ci-dessus, puis installe Écho.</li>
+      <li>SideStore re-signe Écho tout seul avant les 7 jours.</li>
+    </ol>
+    <p style="color:var(--dim);font-size:13px;margin-top:12px">Avec un identifiant Apple gratuit, une app installée ainsi doit être re-signée tous les 7 jours (SideStore / AltStore le font automatiquement) et 3 apps maximum. Adresse de la source : <code>{{SOURCE_URL}}</code></p>
+  </div>
+
+  <h3>Installer sur Android</h3>
+  <div class="card">
+    <ol>
+      <li>Télécharge le fichier <b>.apk</b> depuis ton téléphone.</li>
+      <li>Ouvre-le et autorise l'installation depuis cette source si Android le demande.</li>
+    </ol>
+  </div>
+
+  <p class="foot">Écho {{VERSION}} · fabriqué automatiquement avec GitHub Actions</p>
+</main>
+<script>
+const SRC = "{{SOURCE_URL}}";
+const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const help = document.getElementById("help");
+function show(html){ help.innerHTML = html; help.style.display = "block"; help.scrollIntoView({ behavior:"smooth", block:"center" }); }
+document.querySelectorAll("a[data-app]").forEach(a => a.addEventListener("click", e => {
+  const app = a.dataset.app;
+  if(!iOS){ e.preventDefault(); show(`<b>À ouvrir sur ton iPhone</b><p style="color:var(--dim);margin-top:6px">Ce bouton ouvre ${app} sur l'iPhone. Ouvre cette page dans Safari sur ton iPhone, ou ajoute la source à la main avec l'adresse ci-dessous.</p>`); return; }
+  let left = false; const onHide = () => { left = true; };
+  document.addEventListener("visibilitychange", onHide, { once:true });
+  setTimeout(() => { if(!left && !document.hidden) show(`<b>${app} ne s'est pas ouvert</b><p style="color:var(--dim);margin-top:6px">${app} n'est sûrement pas encore installé sur ton iPhone. Installe-le d'abord (guide sur ${app==="SideStore"?"sidestore.io":"altstore.io"}), ou passe par <b>Sideloadly</b> avec le fichier .ipa. Si ${app} est déjà installé : ouvre-le → <b>Sources</b> → <b>+</b> → colle l'adresse copiée avec le bouton « Copier ».</p>`); }, 1800);
+}));
+document.getElementById("copy").addEventListener("click", async e => {
+  e.preventDefault();
+  try{ await navigator.clipboard.writeText(SRC); e.currentTarget.querySelector("span").textContent = "Copié ✓"; }
+  catch{ prompt("Adresse de la source :", SRC); }
+});
+</script>
+</body>
+</html>

@@ -4,7 +4,7 @@
   "private": true,
   "description": "Écho — ta musique, partout (app iPhone / Android)",
   "scripts": {
-    "www": "rm -rf www && cp -r web www",
+    "www": "rm -rf www && mkdir -p www && cp index.html sw.js manifest.webmanifest icon.svg icon-180.png icon-192.png icon-512.png www/",
     "sync": "npm run www && npx cap sync"
   },
   "dependencies": {
