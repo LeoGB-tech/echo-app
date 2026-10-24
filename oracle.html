@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Écho sur Oracle</title>
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="icon.png">
+<style>
+:root{--bg:#f2f2f7;--card:#fff;--text:#000;--dim:rgba(60,60,67,.62);--line:rgba(60,60,67,.16);--a:#fa2d48;--btn:#f2f2f7;--warn:#fff4e5}
+@media (prefers-color-scheme: dark){:root{--bg:#000;--card:#1c1c1e;--text:#fff;--dim:rgba(235,235,245,.6);--line:rgba(84,84,88,.6);--btn:#2c2c2e;--warn:#2a2112}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;padding:calc(20px + env(safe-area-inset-top)) 16px calc(40px + env(safe-area-inset-bottom))}
+main{max-width:680px;margin:0 auto}
+h1{font-size:34px;font-weight:700}
+.sub{color:var(--dim);margin:2px 0 22px}
+.card{background:var(--card);border-radius:16px;padding:18px;margin-bottom:14px}
+.step{display:flex;gap:14px}
+.n{flex:none;width:30px;height:30px;border-radius:50%;background:var(--a);color:#fff;font-weight:700;display:grid;place-items:center;font-size:15px}
+h2{font-size:19px;font-weight:700;margin-bottom:6px}
+ul{padding-left:18px}li{margin:5px 0}
+b{font-weight:600}
+code,kbd{background:var(--btn);padding:1px 6px;border-radius:6px;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.btn{display:inline-block;margin-top:10px;background:var(--a);color:#fff;border:0;font:inherit;font-weight:600;padding:9px 18px;border-radius:999px;cursor:pointer;text-decoration:none}
+.btn.alt{background:var(--btn);color:var(--a)}
+.warn{background:var(--warn);border-radius:12px;padding:12px 14px;margin-top:10px;font-size:15px}
+.dim{color:var(--dim);font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Écho sur Oracle</h1>
+  <p class="sub">Ton serveur gratuit de 200 Go pour toute ta musique · environ 20 minutes, une seule fois</p>
+
+  <div class="card">
+    <div class="step"><div class="n">1</div><div>
+      <h2>Créer le compte Oracle Cloud</h2>
+      <ul>
+        <li>Va sur <a href="https://signup.cloud.oracle.com" target="_blank" rel="noopener">signup.cloud.oracle.com</a>.</li>
+        <li><b>Région d'origine</b> : choisis <b>France Central (Paris)</b> ou <b>France South (Marseille)</b>. Elle ne peut plus être changée ensuite.</li>
+        <li>Oracle vérifie une <b>carte bancaire</b> (empreinte de 1 € environ, remboursée). Le compte doit être au nom d'un adulte : fais-le avec un parent.</li>
+        <li>Reste sur l'offre gratuite : tant que tu ne cliques pas sur « Passer à un compte payant », rien ne peut être facturé.</li>
+      </ul>
+    </div></div>
+  </div>
+
+  <div class="card">
+    <div class="step"><div class="n">2</div><div>
+      <h2>Copier le script d'installation</h2>
+      <p>Ce script installe tout tout seul (serveur Écho, HTTPS, pare-feu).</p>
+      <button class="btn" id="copy">Copier le script</button>
+      <a class="btn alt" href="install-oracle.sh" download>Télécharger</a>
+      <p class="dim" id="copyMsg" style="margin-top:8px"></p>
+    </div></div>
+  </div>
+
+  <div class="card">
+    <div class="step"><div class="n">3</div><div>
+      <h2>Créer la machine</h2>
+      <ul>
+        <li>Dans la console Oracle : menu ☰ → <b>Compute</b> → <b>Instances</b> → <b>Create instance</b>.</li>
+        <li><b>Name</b> : <code>echo</code>.</li>
+        <li><b>Image</b> → <i>Change image</i> → <b>Canonical Ubuntu 24.04</b>.</li>
+        <li><b>Shape</b> → <i>Change shape</i> → <b>Ampere</b> → <code>VM.Standard.A1.Flex</code>, 1 OCPU, 6 Go de mémoire (marqué « Always Free-eligible »).<br><span class="dim">Si Oracle dit « Out of capacity » : réessaie plus tard, change de « Availability domain », ou prends <code>VM.Standard.E2.1.Micro</code> (aussi gratuit).</span></li>
+        <li><b>Networking</b> : laisse « Create new virtual cloud network » et « Assign a public IPv4 address » cochés.</li>
+        <li><b>SSH keys</b> : « Generate a key pair » puis <b>Save private key</b> (à garder, utile seulement en cas de souci).</li>
+        <li><b>Boot volume</b> : coche « Specify a custom boot volume size » et mets <b>200</b> Go (le maximum gratuit).</li>
+        <li><b>Show advanced options</b> → onglet <b>Management</b> → « Paste cloud-init script » → <b>colle le script</b> copié à l'étape 2.</li>
+        <li>Clique <b>Create</b>.</li>
+      </ul>
+    </div></div>
+  </div>
+
+  <div class="card">
+    <div class="step"><div class="n">4</div><div>
+      <h2>Ouvrir les ports 80 et 443</h2>
+      <ul>
+        <li>Sur la page de ta machine, dans <b>Primary VNIC</b>, clique sur le lien du <b>Subnet</b>.</li>
+        <li>Onglet <b>Security</b> (ou « Security Lists ») → <b>Default Security List…</b> → <b>Add Ingress Rules</b>.</li>
+        <li><b>Source CIDR</b> : <code>0.0.0.0/0</code> · <b>IP Protocol</b> : TCP · <b>Destination Port Range</b> : <code>80,443</code> → <b>Add Ingress Rules</b>.</li>
+      </ul>
+    </div></div>
+  </div>
+
+  <div class="card">
+    <div class="step"><div class="n">5</div><div>
+      <h2>Brancher Écho</h2>
+      <ul>
+        <li>Attends <b>5 à 10 minutes</b> que l'installation se termine.</li>
+        <li>Copie la <b>Public IP address</b> affichée sur la page de la machine (par ex. <code>141.145.12.34</code>).</li>
+        <li>Dans Écho : <b>Réglages → Stockage Oracle</b> → colle l'adresse → <b>Enregistrer et tester</b>.</li>
+        <li>Puis <b>Transférer mes morceaux vers Oracle</b> : laisse Écho ouvert sur le PC pendant le transfert. Chaque morceau est vérifié sur Oracle avant d'être supprimé de Supabase.</li>
+      </ul>
+      <p class="dim" style="margin-top:8px">Ensuite, tous les nouveaux morceaux iront directement sur Oracle (sans limite de 50 Mo par fichier).</p>
+    </div></div>
+  </div>
+
+  <div class="card">
+    <h2>Bon à savoir</h2>
+    <ul>
+      <li>Oracle peut arrêter une machine gratuite qui ne fait presque rien pendant 7 jours. Si Écho n'arrive plus à lire tes morceaux : console Oracle → ta machine → <b>Start</b>. Tes fichiers ne sont pas perdus.</li>
+      <li>Un parent peut aussi passer le compte en « Pay As You Go » : les ressources gratuites restent gratuites et la machine n'est plus arrêtée, mais tout ce qui dépasse l'offre gratuite serait facturé. Ce n'est pas obligatoire.</li>
+      <li>Ta musique n'est accessible qu'avec ton compte Écho : chaque lien de lecture est signé et expire au bout de 12 h.</li>
+    </ul>
+  </div>
+</main>
+<script>
+document.getElementById("copy").onclick = async () => {
+  const m = document.getElementById("copyMsg");
+  try{
+    const t = await (await fetch("install-oracle.sh", { cache:"no-store" })).text();
+    await navigator.clipboard.writeText(t);
+    m.textContent = "Script copié ✓ — colle-le à l'étape 3.";
+  }catch(e){ m.textContent = "Copie impossible : utilise « Télécharger », ouvre le fichier avec le Bloc-notes et copie tout."; }
+};
+</script>
+</body>
+</html>
