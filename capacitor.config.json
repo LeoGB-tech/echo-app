@@ -11,5 +11,11 @@
   },
   "android": {
     "backgroundColor": "#ffffff"
+  },
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DEFAULT"
+    }
   }
 }

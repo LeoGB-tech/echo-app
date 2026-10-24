@@ -328,6 +328,7 @@ main#view{max-width:1100px;margin:0 auto;padding:0 16px}
 #queuePanel .list .row{padding:6px 0;gap:12px}
 /* derrière l'heure/batterie en mode clair : bande noire (le texte de la barre est blanc) ; le lecteur passe par-dessus */
 #sbar{position:fixed;top:0;left:0;right:0;height:var(--safe-t);background:#000;z-index:59;pointer-events:none}
+html.native #sbar{display:none}
 :root[data-theme=dark] #sbar{background:var(--bg)}
 #queuePanel .row .handle{color:rgba(255,255,255,.5);margin-right:-6px}
 #queuePanel .row .rm{width:30px;margin-right:-2px}
@@ -2942,7 +2943,11 @@ function setThemeColor(c){
   const m = document.createElement("meta"); m.name = "theme-color"; m.content = c; document.head.appendChild(m);
   document.documentElement.style.backgroundColor = c;
 }
+const SB = window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins?.StatusBar : null;
+if(SB){ document.documentElement.classList.add("native"); try{ SB.setOverlaysWebView({ overlay:true }); }catch{} }
 function statusBar(dark){
+  // app iPhone/Android : texte blanc sur le lecteur et en mode sombre, noir sur les pages claires
+  if(SB){ try{ SB.setStyle({ style: dark || document.documentElement.dataset.theme === "dark" ? "DARK" : "LIGHT" }); }catch{} }
   if(dark) return setThemeColor(fullTop);
   document.documentElement.style.backgroundColor = "";
   setThemeColor(getComputedStyle(document.body).backgroundColor || "#ffffff");
@@ -5090,7 +5095,7 @@ async function uploadOne(f, prog){
 if("serviceWorker" in navigator && (location.protocol==="https:" || location.hostname==="localhost")) navigator.serviceWorker.register("sw.js").catch(()=>{});
 
 /* ============ mises à jour : sur iPhone l'app reste ouverte des jours, on vérifie à chaque retour ============ */
-const ECHO_BUILD = "2026-10-24.27";
+const ECHO_BUILD = "2026-10-24.28";
 let updPending = false, lastUpdCheck = 0;
 async function checkUpdate(){
   if(!navigator.onLine || Date.now() - lastUpdCheck < 60e3) return; lastUpdCheck = Date.now();
