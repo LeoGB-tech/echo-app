@@ -330,6 +330,9 @@ main#view{max-width:1100px;margin:0 auto;padding:0 16px}
 #sbar{position:fixed;top:0;left:0;right:0;height:var(--safe-t);background:#000;z-index:59;pointer-events:none}
 html.native #sbar{display:none}
 .lzmore{height:1px;grid-column:1/-1}
+#bgjob{position:fixed;left:16px;bottom:calc(150px + var(--safe-b));z-index:55;background:var(--card2);color:var(--text);border:1px solid var(--line);padding:8px 14px;border-radius:999px;font-size:13px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.25);pointer-events:none}
+@media (min-width:900px){#bgjob{left:236px;bottom:110px}}
+.toast{pointer-events:none}
 .ptr{position:fixed;left:50%;top:calc(var(--safe-t) + 6px);z-index:90;width:34px;height:34px;border-radius:50%;background:var(--card2);box-shadow:0 4px 14px rgba(0,0,0,.18);display:grid;place-items:center;opacity:0;transform:translate(-50%,0);transition:opacity .15s;pointer-events:none}
 .ptr i{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--mute);border-top-color:transparent}
 .ptr.go i,.ptr.spin i{border-color:var(--a1);border-top-color:transparent}
@@ -2390,16 +2393,10 @@ function action(a, arg, el){
   switch(a){
     case "upload":
       if(!IS_DESKTOP) return toast("L'ajout de musique se fait depuis ton PC");
-      return sheet(`<h3>Ajouter de la musique</h3>${it("dir","album","Choisir des dossiers","","","plusieurs, sous-dossiers inclus")}${it("files","song","Choisir des fichiers")}${it("clips","down","Récupérer les versions clip","","", clipRun ? `analyse : ${clipRun.done} / ${clipRun.total}` : clipList().length ? `${nMorceaux(clipList().length)} → dossier sur le PC` : "analyse ta bibliothèque")}<p style="color:var(--mute);font-size:13px;padding:8px 10px">« Choisir des dossiers » : prends ton dossier principal (ex. Musique), puis coche ses sous-dossiers avec Ctrl / Maj. Pour les fichiers, Ctrl / Maj marchent directement dans la fenêtre de Windows. Tu peux aussi glisser‑déposer plusieurs dossiers sur la page. Les morceaux déjà présents sont ignorés.</p>`,
+      return sheet(`<h3>Ajouter de la musique</h3>${it("dir","album","Choisir des dossiers","","","plusieurs, sous-dossiers inclus")}${it("files","song","Choisir des fichiers")}${it("fakes","search","Détecter les fausses musiques","","", fakeRun ? `en cours : ${fakeRun.done} / ${fakeRun.total}` : "analyse ton cloud")}${it("clips","down","Récupérer les versions clip","","", clipList().length ? `${nMorceaux(clipList().length)} → dossier sur le PC` : "copie-les dans un dossier du PC")}<p style="color:var(--mute);font-size:13px;padding:8px 10px">« Choisir des dossiers » : prends ton dossier principal (ex. Musique), puis coche ses sous-dossiers avec Ctrl / Maj. Pour les fichiers, Ctrl / Maj marchent directement dans la fenêtre de Windows. Tu peux aussi glisser‑déposer plusieurs dossiers sur la page. Les morceaux déjà présents sont ignorés.</p>`,
         s => { if(s==="files") $("#file").click(); if(s==="dir"){ folderSheet(); $("#folder").click(); return true; }
-          if(s==="clips"){
-            if(clipRun){ toast(`Analyse en cours : ${clipRun.done} / ${clipRun.total}`); return; }
-            const done = tracks.filter(t => t.id in clipScan || t.tag_status === "auto" || t.tag_status === "manual").length;
-            if(clipList().length && done >= tracks.length) return clipExport();
-            if(clipList().length) return clipExport().then(() => clipScanRun()); // dossier avec ce qui est déjà repéré, puis on finit l'analyse
-            clipScanRun().then(() => { if(clipList().length) toast("Analyse terminée — retouche « Récupérer les versions clip » pour créer le dossier"); });
-            toast("Analyse des versions clip en cours… (tu peux continuer à utiliser Écho)");
-          } });
+          if(s==="fakes"){ go("cleanup"); setTimeout(() => fakeScanRun(), 300); return; }
+          if(s==="clips"){ clipScanRun(); if(clipList().length) clipExport().catch(e => { job(null); toast("Copie interrompue : " + (e?.message || "problème de réseau")); }); return; } });
     case "settings": return settingsSheet();
     case "notifs": return notifSheet();
     case "am": return amSheet();
@@ -2424,7 +2421,11 @@ function action(a, arg, el){
     case "cl-del": { const l = (arg==="broken" ? cleanScan().broken : []); return deleteTracks(l).then(() => { LS.set("broken", []); render(); }); }
     case "cl-forget": LS.set("broken", []); return render();
     case "clip-scan": return clipScanRun();
-    case "clip-export": return clipExport();
+    case "fake-scan": return void fakeScanRun();
+    case "fake-export": return void fakeExport().catch(e => { job(null); toast("Téléchargement interrompu : " + (e?.message || "problème de réseau")); });
+    case "fake-budget": { const i = (LS.get("fakeBud", 0) + 1) % FAKE_BUDGETS.length; LS.set("fakeBud", i);
+      toast(i === 0 ? "Budget : 4,5 Go par mois (reste dans l'offre gratuite de Supabase)" : i === 1 ? "Budget : 20 Go par mois — dépasse l'offre gratuite de Supabase (5 Go)" : "Budget illimité — attention, Supabase gratuit n'inclut que 5 Go par mois"); return render(); }
+    case "clip-export": return void clipExport().catch(e => { job(null); toast("Copie interrompue : " + (e?.message || "problème de réseau")); });
     case "edit-smart": return smartForm(playlists.find(x=>x.id===arg));
     case "pl-edit": plEdit = !plEdit; return render();
     case "pl-rm": return removeFromPl(arg);
@@ -2908,7 +2909,7 @@ async function load(autoplay, metaOnly){
     stopRadioMode();
     audio.src = src;
     startPlay({ track_id:t.id, source:playCtx });
-    if(autoplay) audio.play().catch(()=>{});
+    if(autoplay) playNow(t);
   }
   $("#mini").classList.remove("hidden");
   $("#miniT").textContent = $("#fT").textContent = $("#fmT").textContent = t.title;
@@ -2928,7 +2929,30 @@ async function load(autoplay, metaOnly){
   document.querySelectorAll(".row[data-id]").forEach(r => { const on = r.dataset.id===t.id && !r.closest("#queuePanel"); r.classList.toggle("playing", on); });
   if(!metaOnly && ["home","recap"].includes(curR()?.r)) render();
 }
-function toggle(){ if(!queue.length && !radioMode) return; audio.paused ? audio.play().catch(()=>{}) : audio.pause(); }
+function toggle(){ if(!queue.length && !radioMode) return; if(audio.paused){ const t = queue[qi]; if(t && !radioMode) playNow(t); else audio.play().catch(()=>{}); } else { wantPlay = false; audio.pause(); } }
+/* lancement fiable : si le son ne démarre pas (lien expiré, réseau, iPhone qui bloque), on réessaie avec un lien neuf,
+   et si l'iPhone exige un toucher, le bouton « Toucher pour écouter » apparaît */
+let wantPlay = false, playWD = 0, playTry = { id:null, n:0 };
+function playNow(t){
+  wantPlay = true; clearTimeout(playWD);
+  audio.play().catch(e => { if(e?.name === "NotAllowedError") tapToPlay(); });
+  playWD = setTimeout(() => { if(queue[qi]?.id === t.id && wantPlay && (audio.paused || audio.readyState < 3)) retryTrack(t.id); }, 9000);
+}
+audio.addEventListener("playing", () => { clearTimeout(playWD); playTry = { id:null, n:0 }; });
+async function retryTrack(id){
+  const t = queue[qi]; if(!t || t.id !== id || radioMode) return;
+  if(playTry.id === id && playTry.n >= 2){ wantPlay = false; toast("Ce morceau ne se lance pas — passe au suivant"); return; }
+  playTry = { id, n:(playTry.id === id ? playTry.n : 0) + 1 };
+  const pos = audio.currentTime || restorePos || 0;
+  try{
+    if(offline.has(t.id)){ const s2 = await offlineSrc(t); if(s2){ objUrl = s2; audio.src = s2; } }
+    else if((t.parts||1) > 1){ const ps = Array.from({length:t.parts},(_,i)=>partPath(t,i)); Object.assign(urls, await signPaths(ps)); audio.src = await partsBlobUrl(t, () => {}); }
+    else { Object.assign(urls, await signPaths([t.path])); audio.src = urls[t.path]; }
+  }catch{}
+  if(queue[qi]?.id !== id) return;
+  if(pos > 1) seekTarget = pos;
+  playNow(t);
+}
 function next(userAct=true, skipErr){
   if(radioMode){ if(userAct) stepRadio(1); return; }
   if(!queue.length) return;
@@ -2949,7 +2973,7 @@ function next(userAct=true, skipErr){
 function prev(){ if(stepRadio(-1)) return; if(audio.currentTime > 3){ audio.currentTime = 0; return; } if(qi>0){ qi--; load(true); } else { audio.currentTime = 0; } }
 function updModes(){ renderQueue(); }
 
-audio.addEventListener("ended", () => { if(CAN_VOL && LS.get("fade", 0)) fadeIn = true; next(false); });
+audio.addEventListener("ended", () => { if(CAN_FADE && LS.get("fade", 0)) fadeIn = true; next(false); });
 audio.addEventListener("play", syncPP); audio.addEventListener("pause", () => { syncPP(); saveState(); savePlay(); });
 audio.addEventListener("playing", () => {
   const t = queue[qi]; if(t && startedFor!==t.id && !offlineMode){ startedFor = t.id; upd(t.id, { last_played:new Date().toISOString() }); }
@@ -2992,11 +3016,12 @@ let seekTarget = null;
 }));
 audio.addEventListener("error", async () => {
   const t = queue[qi]; if(!t || !audio.src) return;
+  if(radioMode) return;
   if(!audio.src.startsWith("blob:")){
     const s = await offlineSrc(t);
     if(s){ objUrl = s; const pos = audio.currentTime; audio.src = s; audio.currentTime = pos; audio.play().catch(()=>{}); return; }
-    await signAll(true);
   }
+  if(!(playTry.id === t.id && playTry.n >= 2)) return retryTrack(t.id); // lien neuf et nouvel essai
   toast("Lecture impossible pour ce fichier");
   { const br = new Set(LS.get("broken", [])); br.add(t.id); LS.set("broken", [...br]); }
 });
@@ -3007,31 +3032,46 @@ $("#seek").addEventListener("change", seekDone);
 $("#vol").addEventListener("input", e => { audio.volume = e.target.value/100; e.target.style.setProperty("--p", e.target.value+"%"); LS.set("vol", +e.target.value); });
 $("#full").classList.toggle("kb", LS.get("kb2", IS_DESKTOP));
 { const v = LS.get("vol", 100); $("#vol").value = v; $("#vol").style.setProperty("--p", v+"%"); audio.volume = v/100; }
-/* ---- fondu enchaîné + volume égalisé (PC / Android : Safari sur iPhone ne laisse pas les sites régler le volume) ---- */
+/* ---- fondu enchaîné + volume égalisé ----
+   PC / Android : on règle le volume du lecteur. iPhone : Apple bloque le volume des sites, alors on fait passer le son
+   par un petit « table de mixage » (Web Audio) dont on règle le niveau — même rendu, réglé par Écho. */
 const CAN_VOL = (() => { try{ const a = new Audio(); a.volume = .5; return a.volume === .5 && !/iPhone|iPad|iPod/.test(navigator.userAgent); }catch{ return false; } })();
-let fadeIn = false, actx = null;
+const CAN_FADE = CAN_VOL || !!(window.AudioContext || window.webkitAudioContext);
+let fadeIn = false, actx = null, mixGain = null, normComp = null, normGain = null;
 const baseVol = () => LS.get("vol", 100)/100;
 function applyFade(c, d){
-  const F = CAN_VOL ? LS.get("fade", 0) : 0; if(!F || !d) return;
+  const F = CAN_FADE ? LS.get("fade", 0) : 0; if(!F || !d || radioMode){ if(mixGain && mixGain.gain.value !== 1) mixGain.gain.value = 1; return; }
   let k = 1;
   if(repeat !== 2 && d - c < F && d > F*3) k = Math.max(0, (d - c) / F);
   if(fadeIn && c < Math.min(F, 4)) k = Math.min(k, c / Math.min(F, 4)); else if(c >= Math.min(F, 4)) fadeIn = false;
-  const v = baseVol() * k; if(Math.abs(audio.volume - v) > .01) audio.volume = v;
+  if(CAN_VOL){ const v = baseVol() * k; if(Math.abs(audio.volume - v) > .01) audio.volume = v; }
+  else if(mixGain && Math.abs(mixGain.gain.value - k) > .01) mixGain.gain.setTargetAtTime(k, actx.currentTime, .05); // (table créée au premier toucher)
 }
-function normOn(){
-  if(actx || !CAN_VOL || !window.AudioContext) return;
+function applyNorm(){
+  if(!normComp) return; const on = !!LS.get("norm", false);
+  normComp.threshold.value = on ? -26 : 0; normComp.ratio.value = on ? 3.5 : 1; normComp.knee.value = on ? 24 : 0; normGain.gain.value = on ? 1.35 : 1;
+}
+function graphOn(){
+  if(actx) return; const AC = window.AudioContext || window.webkitAudioContext; if(!AC) return;
   try{
-    const pos = audio.currentTime, playing = !audio.paused, src0 = audio.src;
+    try{ if(navigator.audioSession) navigator.audioSession.type = "playback"; }catch{} // iPhone : le son continue écran verrouillé
+    const pos = audio.currentTime, playing = !audio.paused, src0 = audio.src, needReload = audio.crossOrigin !== "anonymous";
     audio.crossOrigin = "anonymous";
-    actx = new AudioContext();
-    const src = actx.createMediaElementSource(audio), comp = actx.createDynamicsCompressor(), g = actx.createGain();
-    comp.threshold.value = -26; comp.knee.value = 24; comp.ratio.value = 3.5; comp.attack.value = .005; comp.release.value = .3; g.gain.value = 1.35;
-    src.connect(comp).connect(g).connect(actx.destination);
-    if(src0){ audio.src = src0; restorePos = pos; if(playing) audio.play().catch(()=>{}); }
+    actx = new AC();
+    const src = actx.createMediaElementSource(audio);
+    normComp = actx.createDynamicsCompressor(); normGain = actx.createGain(); mixGain = actx.createGain();
+    normComp.attack.value = .005; normComp.release.value = .3; applyNorm();
+    src.connect(normComp).connect(normGain).connect(mixGain).connect(actx.destination);
+    actx.onstatechange = () => { if(actx.state !== "running" && !audio.paused) actx.resume().catch(()=>{}); };
+    if(src0 && needReload){ audio.src = src0; restorePos = pos; if(playing) audio.play().catch(()=>{}); }
   }catch(e){ console.warn(e); }
 }
-audio.addEventListener("play", () => actx?.resume?.());
-if(LS.get("norm", false) && CAN_VOL){ audio.crossOrigin = "anonymous"; addEventListener("pointerdown", () => normOn(), { once:true }); }
+const normOn = graphOn;
+audio.addEventListener("play", () => actx?.resume?.().catch(()=>{}));
+document.addEventListener("visibilitychange", () => { if(actx && actx.state !== "running" && !audio.paused) actx.resume().catch(()=>{}); });
+// la radio ne passe pas toujours par la table de mixage (règles des serveurs) : on prévient
+audio.addEventListener("error", () => { if(actx && radioMode) toast("Cette radio ne marche pas avec le fondu enchaîné / volume égalisé — désactive-les dans Réglages"); });
+if(LS.get("norm", false) || (!CAN_VOL && LS.get("fade", 0))){ audio.crossOrigin = "anonymous"; addEventListener("pointerdown", () => graphOn(), { once:true }); }
 
 $("#pp").onclick = $("#miniPP").onclick = toggle;
 $("#next").onclick = $("#miniNext").onclick = () => next(true);
@@ -3367,7 +3407,7 @@ async function loadFeatured(){
     const r = await rb(`stations/search?name=${encodeURIComponent(name)}&countrycode=FR&hidebroken=true&order=clickcount&reverse=true&limit=8`);
     const k = norm(name);
     const score = st => (norm(st.name)===k ? 3 : norm(st.name).startsWith(k) ? 2 : 0);
-    const best = (r||[]).filter(playable).sort((a,b)=> score(b)-score(a) || hasAds(a.url_resolved) - hasAds(b.url_resolved) || b.clickcount-a.clickcount)[0];
+    const best = (r||[]).filter(playable).sort((a,b)=> score(b)-score(a) || b.clickcount-a.clickcount)[0];
     if(best) out[i] = { ...toStation(best), name };
   }));
   const list = out.filter(Boolean);
@@ -3418,33 +3458,13 @@ document.addEventListener("click", e => {
   e.stopPropagation();
   const list = radioCache[el.dataset.rlist] || []; const st = list.find(x=>x.uuid===el.dataset.radio); if(st) playRadio(st, list);
 }, true);
-/* ---- pubs au lancement : beaucoup de radios privées (NRJ, Chérie, Nostalgie, Rire & Chansons…) passent leur flux par
-   un serveur publicitaire (« AdsWizz ») qui insère une pub à CHAQUE nouvelle connexion → quand on change de radio et qu'on
-   revient, la pub recommence. On prend l'adresse directe du flux, sans ce serveur, quand elle existe. */
-const hasAds = u => /adwz|adswizz|aw_0_|\/ads?\/|preroll|deliveryengine/i.test(String(u||"")) ? 1 : 0;
-function adFree(u){
-  try{
-    const x = new URL(u);
-    x.pathname = x.pathname.replace(/\/adwz\d*\//i, "/");                       // scdn.nrjaudio.fm/adwz2/fr/30001/… → /fr/30001/…
-    [...x.searchParams.keys()].forEach(k => { if(/^(aw_|awparams|listenerid|origine|cmp|gdpr|us_privacy)/i.test(k)) x.searchParams.delete(k); });
-    return x.toString();
-  }catch{ return u; }
-}
 function playRadio(st, list){
   savePlay(); radioMode = st; radioList = list || [st];
   // la radio remplace la musique : la file d'attente des morceaux est vidée (comme sur Apple Music)
   queue = []; qi = 0; baseList = []; userQ.clear(); saveState(); renderQueue();
-  // adresse unique à chaque lancement : le navigateur ne peut pas resservir un vieux bout de flux (pub qui recommence…) → vrai direct
-  const direct = adFree(st.url);
-  const live = direct + (direct.includes("?") ? "&" : "?") + "echo=" + Date.now();
-  audio.pause(); audio.removeAttribute("src"); audio.load();
-  audio.preload = "auto"; audio.src = live;
-  audio.play().catch(() => {
-    // l'adresse directe ne marche pas pour cette radio : on reprend l'adresse d'origine
-    if(direct !== st.url && radioMode?.uuid === st.uuid){ audio.src = st.url + (st.url.includes("?") ? "&" : "?") + "echo=" + Date.now(); audio.play().catch(() => toast("Radio indisponible pour le moment")); }
-    else toast("Radio indisponible pour le moment");
-  });
-  if(direct !== st.url){ const onErr = () => { if(radioMode?.uuid === st.uuid && audio.src.includes(direct.split("?")[0])){ audio.src = st.url; audio.play().catch(()=>{}); } }; audio.addEventListener("error", onErr, { once:true }); }
+  wantPlay = false; clearTimeout(playWD);
+  audio.preload = "auto"; audio.src = st.url;
+  audio.play().catch(e => { if(radioMode?.uuid !== st.uuid) return; if(e?.name === "NotAllowedError") tapToPlay(); else toast("Radio indisponible pour le moment"); });
   radioMeta = null; startRadioMeta(st); setTimeout(() => connTrack(true), 0);
   startPlay({ radio:st.name, source:"radio" });
   $("#full").classList.add("is-radio"); $("#mini").classList.remove("hidden");
@@ -3726,7 +3746,7 @@ function vCleanup(){
   h += `<div class="sec"><h3>Infos incomplètes</h3>${c.noinfo.length?`<button data-act="cl-fix">Corriger avec Apple Music</button>`:""}</div>`;
   h += c.noinfo.length ? `<div class="list">${c.noinfo.slice(0,100).map(t=>tRow(t,keyN,{ sub: [!t.artist&&"artiste manquant", !t.album&&"album manquant"].filter(Boolean).join(" · ") || esc(t.artist||"") })).join("")}</div>${c.noinfo.length>100?`<p class="note">… et ${c.noinfo.length-100} autres</p>`:""}` : `<p class="note">Tous les morceaux ont un titre, un artiste et un album.</p>`;
   h += `<div class="sec"><h3>Sans pochette</h3></div><p class="note">${c.nocover.length ? `${nMorceaux(c.nocover.length)} sans pochette. « Infos Apple Music » ajoute les pochettes officielles.` : "Toutes tes pochettes sont là."}</p>`;
-  h += clipSection();
+  h += clipSection(); h += fakeSection();
   return h;
 }
 /* ============ versions clip : repérées en silence, copiées dans un dossier du PC (rien n'est modifié sur le site) ============
@@ -3742,35 +3762,190 @@ function clipVerdict(t, xs){ // xs : résultats Apple Music
 }
 const clipList = () => tracks.filter(t => clipScan[t.id]?.c === 1);
 function clipSection(){
-  const done = tracks.filter(t => t.id in clipScan || t.tag_status === "auto" || t.tag_status === "manual").length, l = clipList();
+  const done = tracks.filter(t => t.tag_status).length, l = clipList();
   return `<div class="sec"><h3>Versions clip</h3></div>
     <p class="note">Morceaux dont la durée diffère de plus de 3 s de la version d'Apple Music (souvent la version du clip). Rien n'est modifié : Écho crée seulement un dossier sur ton PC avec ces fichiers, pour les repasser dans Nami.</p>
-    <p class="note" id="clipInfo">${clipRun ? `Analyse : ${clipRun.done} / ${clipRun.total}…` : `${nMorceaux(l.length)} repéré${l.length>1?"s":""} · ${done} / ${tracks.length} analysés`}</p>
+    <p class="note" id="clipInfo">${nMorceaux(l.length)} repéré${l.length>1?"s":""} · ${done} / ${tracks.length} vérifiés par le serveur</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap;padding:4px 0 10px">
-      <button class="btn btn-ghost" data-act="clip-scan">${ICON.search}${clipRun ? "Arrêter" : done < tracks.length ? "Analyser la bibliothèque" : "Analyser les nouveaux morceaux"}</button>
+      <button class="btn btn-ghost" data-act="clip-scan">${ICON.search}Mettre à jour la liste</button>
       ${l.length ? `<button class="btn btn-main" data-act="clip-export">${ICON.down}Créer le dossier sur le PC (${l.length})</button>` : ""}
     </div>`;
 }
 function clipInfo(){ const el = $("#clipInfo"); if(el && clipRun) el.textContent = `Analyse : ${clipRun.done} / ${clipRun.total} · ${clipList().length} version${clipList().length>1?"s":""} clip trouvée${clipList().length>1?"s":""}`; }
-async function clipScanRun(){
-  if(clipRun){ clipRun.stop = true; return; }
-  if(offlineMode || !navigator.onLine) return toast("Connexion requise");
-  // déjà connus sans recherche : corrigés automatiquement (durée identique) ou avec des propositions enregistrées
-  for(const t of tracks){ if(t.id in clipScan) continue;
-    if(t.tag_status === "auto" || t.tag_status === "manual") clipScan[t.id] = { c:0 };
-    else if(t.tag_status === "review" && t.tag_review?.length){ const v = clipVerdict(t, t.tag_review.map(r => ({ trackName:r.title, artistName:r.artist, collectionArtistName:r.album_artist, trackTimeMillis:(r.dur||0)*1000, trackViewUrl:r.url }))); if(v) clipScan[t.id] = v; } }
-  LS.set("clipScan", clipScan);
-  const todo = tracks.filter(t => !(t.id in clipScan) && t.duration);
-  clipRun = { done:0, total:todo.length, stop:false }; render();
-  for(const t of todo){
-    if(clipRun.stop) break;
-    const term = `${primaryArtist(t.artist || t.album_artist || "")} ${String(t.title).replace(/\s*[\(\[].*?[\)\]]/g,"")}`.trim();
-    const r = await itunes(`search?term=${encodeURIComponent(term)}&entity=song&limit=25`);
-    if(r){ clipScan[t.id] = clipVerdict(t, (r.results||[]).filter(x => x.kind==="song")) || { c:0, n:1 }; }
-    clipRun.done++; if(clipRun.done % 10 === 0) LS.set("clipScan", clipScan); clipInfo();
+// instantané : le serveur compare déjà chaque morceau à Apple Music (correction automatique) ; on relit son résultat
+function clipScanRun(){
+  if(clipRun){ clipRun = null; render(); return; }
+  let wait = 0;
+  for(const t of tracks){
+    if(clipScan[t.id]?.c === 1 && !clipScan[t.id].auto) continue; // trouvé lors d'une ancienne analyse : on garde
+    if(t.tag_status === "auto" || t.tag_status === "manual"){ clipScan[t.id] = { c:0, auto:1 }; continue; }
+    if(t.tag_status === "review" && t.tag_review?.length){
+      const v = clipVerdict(t, t.tag_review.map(r => ({ trackName:r.title, artistName:r.artist, collectionArtistName:r.album_artist, trackTimeMillis:(r.dur||0)*1000, trackViewUrl:r.url })));
+      clipScan[t.id] = v ? { ...v, auto:1 } : { c:0, n:1, auto:1 }; continue;
+    }
+    if(t.tag_status === "none"){ clipScan[t.id] = { c:0, n:1, auto:1 }; continue; }
+    wait++; delete clipScan[t.id];
   }
-  LS.set("clipScan", clipScan); const n = clipList().length; clipRun = null; render();
-  toast(`${n} version${n>1?"s":""} clip repérée${n>1?"s":""}`);
+  LS.set("clipScan", clipScan);
+  const n = clipList().length;
+  if(/^cleanup/.test(curR().r)) render();
+  toast(`${n} version${n>1?"s":""} clip repérée${n>1?"s":""}${wait ? ` · ${wait} morceaux pas encore vérifiés par le serveur` : ""}`);
+  return { n, wait };
+}
+/* petite pastille de progression en bas, qui ne bloque rien */
+function job(msg){
+  let el = document.getElementById("bgjob");
+  if(!msg){ el?.remove(); return; }
+  if(!el){ el = document.createElement("div"); el.id = "bgjob"; document.body.appendChild(el); }
+  el.textContent = msg;
+}
+/* ============ fausses musiques : on écoute chaque fichier et on le compare à l'extrait officiel d'Apple Music ============
+   On télécharge seulement des passages de 50 s de chaque morceau (là où l'extrait d'Apple a le plus de chances d'être).
+   Empreinte : énergie de 24 bandes de fréquences dans le temps (sa variation, pour ignorer volume et qualité), puis on cherche
+   où l'extrait de 20 s colle le mieux dans le morceau. Même enregistrement ≈ 60-100 % ; autre morceau, version accélérée,
+   reprise ou IA ≈ 5-15 %. En dessous de 30 % → copié dans « Écho - fausses musiques ». Rien n'est modifié sur le site. */
+const FAKE_MIN = 0.3, FAKE_DIR = "Écho - fausses musiques";
+let fakeRes = LS.get("fake1", {}), fakeRun = null;
+const FK_WORKER = `
+const SR = 11025, N = 2048, H = 512, NB = 24;
+function fft(re, im){ const n = re.length; for(let i=1,j=0;i<n;i++){ let b=n>>1; for(;j&b;b>>=1) j^=b; j^=b; if(i<j){ let t=re[i]; re[i]=re[j]; re[j]=t; t=im[i]; im[i]=im[j]; im[j]=t; } }
+  for(let len=2; len<=n; len<<=1){ const a=-2*Math.PI/len, wr=Math.cos(a), wi=Math.sin(a); for(let i=0;i<n;i+=len){ let cr=1, ci=0; for(let j=0;j<len/2;j++){ const k=i+j+len/2, ur=re[i+j], ui=im[i+j], vr=re[k]*cr-im[k]*ci, vi=re[k]*ci+im[k]*cr; re[i+j]=ur+vr; im[i+j]=ui+vi; re[k]=ur-vr; im[k]=ui-vi; const t=cr*wr-ci*wi; ci=cr*wi+ci*wr; cr=t; } } } }
+const win = new Float32Array(N).map((_,i)=>0.5-0.5*Math.cos(2*Math.PI*i/N));
+const mel = f => 2595*Math.log10(1+f/700), lo = mel(100), hi = mel(4500), band = new Int8Array(N/2).fill(-1);
+for(let k=1;k<N/2;k++){ const m = mel(k*SR/N); if(m>=lo && m<hi) band[k] = Math.floor((m-lo)/(hi-lo)*NB); }
+function feat(x){ const re=new Float64Array(N), im=new Float64Array(N), E=[];
+  for(let p=0;p+N<=x.length;p+=H){ for(let i=0;i<N;i++){ re[i]=x[p+i]*win[i]; im[i]=0; } fft(re,im); const e=new Float64Array(NB);
+    for(let k=1;k<N/2;k++){ const b=band[k]; if(b>=0) e[b]+=re[k]*re[k]+im[k]*im[k]; } for(let b=0;b<NB;b++) e[b]=Math.log(1e-9+e[b]); E.push(e); }
+  const D=[]; for(let t=0;t+1<E.length;t++){ const d=new Float32Array(NB); for(let b=0;b<NB;b++) d[b]=E[t+1][b]-E[t][b]; D.push(d); } return D; }
+function match(P, T){ if(!P.length || T.length < P.length) return { s:0, at:0 }; const n=P.length*NB; let pm=0; for(const p of P) for(let b=0;b<NB;b++) pm+=p[b]; pm/=n;
+  let ps=0; for(const p of P) for(let b=0;b<NB;b++) ps+=(p[b]-pm)**2; ps=Math.sqrt(ps)||1; let best=-1, at=0;
+  for(let l=0;l<=T.length-P.length;l++){ let tm=0; for(let i=0;i<P.length;i++){ const t=T[l+i]; for(let b=0;b<NB;b++) tm+=t[b]; } tm/=n; let num=0, ts=0;
+    for(let i=0;i<P.length;i++){ const p=P[i], t=T[l+i]; for(let b=0;b<NB;b++){ const dt=t[b]-tm; num+=(p[b]-pm)*dt; ts+=dt*dt; } } const s=num/(ps*(Math.sqrt(ts)||1)); if(s>best){ best=s; at=l; } }
+  return { s:best, at:at*H/SR }; }
+onmessage = e => { const { id, p, t } = e.data; try{ postMessage({ id, ...match(feat(p), feat(t)) }); }catch(err){ postMessage({ id, s:null, err:String(err) }); } };`;
+let fkW = null, fkWid = 0; const fkWait = new Map();
+function fkCompare(p, t){
+  if(!fkW){ fkW = new Worker(URL.createObjectURL(new Blob([FK_WORKER], { type:"text/javascript" }))); fkW.onmessage = e => { const f = fkWait.get(e.data.id); fkWait.delete(e.data.id); f?.(e.data); }; }
+  return new Promise(res => { const id = ++fkWid; fkWait.set(id, res); fkW.postMessage({ id, p, t }, [p.buffer, t.buffer]); });
+}
+async function fkDecode(ab, from, len){
+  const b = await new OfflineAudioContext(1, 2, 44100).decodeAudioData(ab);
+  const st = Math.min(from, Math.max(0, b.duration - 1)), dur = Math.max(0.5, Math.min(len, b.duration - st));
+  const oc = new OfflineAudioContext(1, Math.ceil(dur * 11025), 11025); const s = oc.createBufferSource(); s.buffer = b; s.connect(oc.destination); s.start(0, st, dur);
+  return { x:(await oc.startRendering()).getChannelData(0).slice(), dur:b.duration };
+}
+const appleIdOf = t => t?.apple_id || (/[?&]i=(\d+)/.exec(t?.tag_review?.[0]?.url || "") || [])[1] || null;
+// budget de téléchargement par mois (Supabase gratuit : 5 Go de sortie / mois)
+const FAKE_BUDGETS = [4.5e9, 20e9, Infinity];
+const fakeBudget = () => FAKE_BUDGETS[LS.get("fakeBud", 0)] ?? FAKE_BUDGETS[0];
+const fakeEg = () => { const m = new Date().toISOString().slice(0, 7), e = LS.get("fakeEg", null); return e && e.m === m ? e : { m, b:0 }; };
+const fmtGo = b => (b / 1e9).toFixed(b < 1e10 ? 1 : 0).replace(".", ",") + " Go";
+const fakeList = () => tracks.filter(t => { const r = fakeRes["id:" + t.id]; return r && r.s != null && r.s < FAKE_MIN; });
+async function fakeScanRun(){
+  if(fakeRun){ fakeRun.stop = true; return; }
+  if(offlineMode || !navigator.onLine) return toast("Connexion requise");
+  if(fakeEg().b >= fakeBudget()) return toast(`Budget du mois atteint (${fmtGo(fakeBudget())}) — reprend le mois prochain, ou augmente-le dans la page de nettoyage`);
+  // d'abord les morceaux douteux (pas confirmés par Apple Music), ensuite le reste
+  const prio = t => (t.tag_status === "auto" || t.tag_status === "manual") ? 2 : 1;
+  const todo = tracks.filter(t => !(("id:" + t.id) in fakeRes) && (t.parts || 1) === 1).sort((a, b) => prio(a) - prio(b));
+  fakeRun = { stop:false, done:tracks.length - todo.length, total:tracks.length, found:fakeList().length };
+  const show = () => job(`Fausses musiques : ${fakeRun.done} / ${fakeRun.total} · ${fakeRun.found} trouvée${fakeRun.found>1?"s":""} · ${fmtGo(fakeEg().b)}`);
+  show(); if(/^cleanup/.test(curR().r)) render();
+  let why = "";
+  try{
+    for(let c = 0; c < todo.length && !fakeRun.stop; c += 30){
+      const chunk = todo.slice(c, c + 30);
+      const ids = [...new Set(chunk.map(appleIdOf).filter(Boolean))], am = new Map();
+      if(ids.length){ const r = await itunes(`lookup?id=${ids.join(",")}`); (r?.results || []).filter(x => x.kind === "song" && x.previewUrl).forEach(x => am.set(String(x.trackId), x)); }
+      const unsigned = chunk.map(t => t.path).filter(p2 => !urls[p2]);
+      if(unsigned.length) Object.assign(urls, await signPaths(unsigned).catch(() => ({})));
+      for(const t of chunk){
+        if(fakeRun.stop) break;
+        const res = { s:null, name:`${t.artist || "?"} - ${t.title}` };
+        try{
+          let x = am.get(String(appleIdOf(t) || ""));
+          if(!x){ // pas encore relié à Apple Music : recherche (titre + artiste + durée)
+            const r = await itunes(`search?term=${encodeURIComponent(`${primaryArtist(t.artist || t.album_artist || "")} ${String(t.title).replace(/\s*[\(\[].*?[\)\]]/g, "")}`.trim())}&entity=song&limit=15`);
+            const cand = (r?.results || []).filter(y => y.kind === "song" && y.previewUrl).map(y => ({ y, sc:songScore(t, y) })).filter(o => o.sc.ts >= .85 && o.sc.as >= .8).sort((a, b) => (a.sc.dd ?? 99) - (b.sc.dd ?? 99));
+            x = cand[0]?.y;
+          }
+          if(!x){ res.why = "introuvable sur Apple Music"; }
+          else {
+            res.u = x.trackViewUrl || "";
+            const pvAb = await (await fetch(x.previewUrl)).arrayBuffer();
+            const P = await fkDecode(pvAb.slice(0), 5, 20);
+            const url = urls[t.path]; if(!url) throw new Error("lien");
+            const size = t.size || 0, dur = t.duration || 0, isMp3 = /\.mp3$/i.test(rp(t.path));
+            // on ne télécharge que des morceaux de 50 s, là où l'extrait d'Apple a le plus de chances d'être
+            let wins;
+            if(isMp3 && size && dur > 60){
+              const W = Math.max(700e3, Math.ceil(size / dur * 50));
+              const starts = [.38, .55, .22, .7, .85, .08, .95].map(f => Math.max(0, Math.min(size - W, Math.round(f * size - W / 2))));
+              wins = [...new Set(starts)].map(a2 => [a2, Math.min(size - 1, a2 + W)]);
+            } else wins = [[0, size ? size - 1 : null]];
+            let best = 0;
+            for(const [a2, b2] of wins){
+              const eg = fakeEg(); if(eg.b >= fakeBudget()){ fakeRun.stop = true; why = "budget"; break; }
+              const r = await fetch(url, b2 == null ? {} : { headers:{ Range:`bytes=${a2}-${b2}` } });
+              if(!r.ok) throw new Error("HTTP " + r.status);
+              const ab = await r.arrayBuffer(); eg.b += ab.byteLength; LS.set("fakeEg", eg);
+              let T; try{ T = await fkDecode(ab, 0, 720); }catch{ continue; }
+              const m2 = await fkCompare(P.x.slice(), T.x);
+              if(m2.s != null) best = Math.max(best, m2.s);
+              if(best >= .45) break; // passage retrouvé : c'est le bon enregistrement
+            }
+            if(why === "budget" && best < FAKE_MIN) break; // pas fini ce morceau : on le refera
+            res.s = Math.round(best * 1000) / 1000;
+          }
+        }catch(e){ res.why = "erreur : " + (e?.message || e); if(/HTTP 4/.test(res.why)) delete urls[t.path]; }
+        if(why === "budget" && res.s == null && !res.why) break;
+        fakeRes["id:" + t.id] = res; fakeRun.done++;
+        if(res.s != null && res.s < FAKE_MIN) fakeRun.found++;
+        show(); if(fakeRun.done % 10 === 0) LS.set("fake1", fakeRes);
+      }
+    }
+  }catch(e){ why = why || ("erreur : " + (e?.message || e)); }
+  LS.set("fake1", fakeRes);
+  const n = fakeList().length, stopped = fakeRun.stop;
+  job(null); fakeRun = null;
+  toast(why === "budget" ? `Budget du mois atteint (${fmtGo(fakeBudget())}) — ${n} fausse${n>1?"s":""} musique${n>1?"s":""} pour l'instant` : stopped ? `En pause — ${n} fausse${n>1?"s":""} musique${n>1?"s":""} pour l'instant` : `Analyse terminée : ${n} fausse${n>1?"s":""} musique${n>1?"s":""}`);
+  if(/^cleanup/.test(curR().r)) render();
+}
+// télécharge les fausses musiques dans un dossier (ou un .zip)
+async function fakeExport(){
+  const l = fakeList(); if(!l.length) return toast("Aucune fausse musique pour l'instant");
+  const safe = s2 => String(s2||"").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+  const name = t => `${safe(t.artist || "Artiste inconnu")} - ${safe(t.title)}.${rp(t.path).split(".").pop()}`;
+  const listTxt = l.map(t => { const r = fakeRes["id:" + t.id]; return `${t.artist || ""} - ${t.title}\t${Math.round(r.s * 100)} % de ressemblance\t${r.u || ""}`; }).join("\r\n") + "\r\n";
+  const getBlob = async t => { const u = urls[t.path] || (Object.assign(urls, await signPaths([t.path])), urls[t.path]); const r = await fetch(u); if(!r.ok) throw new Error("HTTP " + r.status); return r.blob(); };
+  if(window.showDirectoryPicker){
+    let root; try{ root = await showDirectoryPicker({ mode:"readwrite", id:"echo-fakes", startIn:"downloads" }); }catch{ return; }
+    const dir = await root.getDirectoryHandle(FAKE_DIR, { create:true });
+    const write = async (fname, data) => { const fh = await dir.getFileHandle(fname, { create:true }); const w = await fh.createWritable(); await w.write(data); await w.close(); };
+    await write("liste.txt", listTxt);
+    let done = 0, fail = 0, k = 0;
+    await Promise.all(Array.from({ length:3 }, async () => { while(k < l.length){ const t = l[k++]; try{ await write(name(t), await getBlob(t)); }catch{ fail++; } done++; job(`Fausses musiques : ${done} / ${l.length}`); } }));
+    job(null); return toast(`Dossier « ${FAKE_DIR} » prêt : ${l.length - fail} fichier${l.length-fail>1?"s":""}${fail?`, ${fail} en échec`:""}`);
+  }
+  if(!window.JSZip) await new Promise((ok, ko) => { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"; sc.onload = ok; sc.onerror = ko; document.head.appendChild(sc); });
+  const zip = new JSZip(), f = zip.folder(FAKE_DIR); f.file("liste.txt", listTxt);
+  let i = 0, k = 0;
+  await Promise.all(Array.from({ length:3 }, async () => { while(k < l.length){ const t = l[k++]; try{ f.file(name(t), await getBlob(t)); }catch{} i++; job(`Fausses musiques : ${i} / ${l.length}`); } }));
+  job(null);
+  const blob = await zip.generateAsync({ type:"blob", compression:"STORE" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = FAKE_DIR + ".zip"; document.body.appendChild(a); a.click(); a.remove();
+}
+function fakeSection(){
+  const l = fakeList(), done = tracks.filter(t => ("id:" + t.id) in fakeRes).length, eg = fakeEg(), bud = fakeBudget();
+  return `<div class="sec"><h3>Fausses musiques</h3></div>
+    <p class="note">Écho écoute un passage de chaque morceau de ton cloud et le compare à l'extrait officiel d'Apple Music. Ceux qui ne correspondent pas (autre morceau, version accélérée, reprise, IA…) sont listés ici et tu peux les télécharger dans un dossier « ${FAKE_DIR} ». Rien n'est modifié ni supprimé.</p>
+    <p class="note">${fakeRun ? `En cours : ${fakeRun.done} / ${fakeRun.total}` : `${done} / ${tracks.length} analysés · ${l.length} fausse${l.length>1?"s":""} musique${l.length>1?"s":""}`} · téléchargé ce mois-ci : ${fmtGo(eg.b)} / ${bud === Infinity ? "illimité" : fmtGo(bud)}</p>
+    ${l.length ? `<div class="list">${l.slice(0, 100).map(t => tRow(t, reg("fakes", l), { sub:`${esc(t.artist || "")} · ${Math.round(fakeRes["id:" + t.id].s * 100)} % de ressemblance` })).join("")}</div>` : ""}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;padding:4px 0 10px">
+      <button class="btn btn-main" data-act="fake-scan">${ICON.search}${fakeRun ? "Mettre en pause" : done ? "Continuer l'analyse" : "Analyser mon cloud"}</button>
+      ${l.length ? `<button class="btn btn-ghost" data-act="fake-export">${ICON.down}Télécharger (${l.length})</button>` : ""}
+      <button class="btn btn-ghost" data-act="fake-budget">Budget : ${bud === Infinity ? "illimité" : fmtGo(bud) + " / mois"}</button>
+    </div>`;
 }
 async function clipExport(){
   const l = clipList(); if(!l.length) return;
@@ -3784,9 +3959,14 @@ async function clipExport(){
     const dir = await root.getDirectoryHandle("Écho - versions clip", { create:true });
     const write = async (fname, data) => { const fh = await dir.getFileHandle(fname, { create:true }); const w = await fh.createWritable(); await w.write(data); await w.close(); };
     await write("liste.txt", listTxt); await write("liste avec liens Apple Music.txt", linksTxt);
-    let i = 0, fail = 0;
-    for(const t of l){ i++; toast(`Copie des fichiers… ${i} / ${l.length}`); try{ await write(name(t), await getBlob(t)); }catch{ fail++; } }
-    toast(`Dossier « Écho - versions clip » créé : ${l.length - fail} fichier${l.length-fail>1?"s":""}${fail?`, ${fail} en échec`:""}`);
+    let done = 0, fail = 0, k = 0;
+    // fichiers déjà présents dans le dossier (relance après coupure) : on ne les recopie pas
+    const have = new Set(); try{ for await (const [n2] of dir.entries()) have.add(n2); }catch{}
+    const todo = l.filter(t => !have.has(name(t))); done = l.length - todo.length;
+    job(`Versions clip : ${done} / ${l.length}`);
+    await Promise.all(Array.from({ length:3 }, async () => { while(k < todo.length){ const t = todo[k++]; try{ await write(name(t), await getBlob(t)); }catch{ fail++; } done++; job(`Versions clip : ${done} / ${l.length}`); } }));
+    job(null);
+    toast(`Dossier « Écho - versions clip » prêt : ${l.length - fail} fichier${l.length-fail>1?"s":""}${fail?`, ${fail} en échec`:""}`);
     return;
   }
   // autres navigateurs : un fichier .zip à décompresser
@@ -3794,7 +3974,9 @@ async function clipExport(){
   if(!window.JSZip) await new Promise((ok, ko) => { const s = document.createElement("script"); s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"; s.onload = ok; s.onerror = ko; document.head.appendChild(s); });
   const zip = new JSZip(), f = zip.folder("Écho - versions clip");
   f.file("liste.txt", listTxt); f.file("liste avec liens Apple Music.txt", linksTxt);
-  let i = 0; for(const t of l){ i++; toast(`Préparation… ${i} / ${l.length}`); try{ f.file(name(t), await getBlob(t)); }catch{} }
+  let i = 0, k = 0;
+  await Promise.all(Array.from({ length:3 }, async () => { while(k < l.length){ const t = l[k++]; try{ f.file(name(t), await getBlob(t)); }catch{} i++; job(`Versions clip : ${i} / ${l.length}`); } }));
+  job(null);
   const blob = await zip.generateAsync({ type:"blob", compression:"STORE" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "Écho - versions clip.zip"; document.body.appendChild(a); a.click(); a.remove();
 }
@@ -4530,7 +4712,7 @@ async function settingsSheet(){
     ${it("theme","sparkle","Apparence","","",APPEAR[LS.get("appearance","auto")][0])}
     ${it("push","bell","Notifications push","","",pushState())}
     ${it("oracle","upload","Stockage Oracle (200 Go gratuits)","","", ORA ? (tracks.some(t=>!isOra(t.path)) ? "À transférer" : "Actif") : "Non configuré")}
-    ${CAN_VOL ? it("fade","shuffle","Fondu enchaîné","","", LS.get("fade",0) ? LS.get("fade",0)+" s" : "Désactivé") + it("norm","sparkle","Volume égalisé", LS.get("norm",false)?"on":"", "", LS.get("norm",false)?"Activé":"Désactivé") : it("noios","shuffle","Fondu enchaîné · volume égalisé","","","Pas sur iPhone")}
+    ${CAN_FADE ? it("fade","shuffle","Fondu enchaîné","","", LS.get("fade",0) ? LS.get("fade",0)+" s" : "Désactivé") + it("norm","sparkle","Volume égalisé", LS.get("norm",false)?"on":"", "", LS.get("norm",false)?"Activé":"Désactivé") : ""}
     ${it("amauto","sparkle","Corriger la bibliothèque avec Apple Music", LS.get("amAuto",true)?"on":"", "", LS.get("amAuto",true) ? (()=>{ const d = tracks.filter(t=>t.tag_status).length; return d >= tracks.length ? "Tout est fait" : `${d.toLocaleString("fr-FR")} / ${tracks.length.toLocaleString("fr-FR")}`; })() : "Désactivé")}
     ${it("kb","album","Fond animé", LS.get("kb2", IS_DESKTOP)?"on":"", "", LS.get("kb2", IS_DESKTOP)?"Activé":"Désactivé")}
     ${it("kara","lyrics","Paroles mot à mot (karaoké)", LS.get("karaoke",true)?"on":"", "", LS.get("karaoke",true)?"Activé":"Désactivé")}
@@ -4550,8 +4732,10 @@ async function settingsSheet(){
     if(s==="push") return enablePush(), true;
     if(s==="oracle") return oracleSheet(), true;
     if(s==="noios"){ sheet(`<h3>Fondu enchaîné sur iPhone</h3><p class="note" style="line-height:1.5">Sur iPhone, Apple interdit aux sites et aux apps web de changer le volume du son : seul le bouton de volume du téléphone le peut. Le fondu enchaîné et le volume égalisé ont besoin de baisser et monter le volume, donc ils ne peuvent pas marcher dans Écho sur iPhone.<br><br>La seule autre méthode (passer le son par un « mixeur » interne) couperait la musique dès que l'écran se verrouille, ce qui serait bien pire.<br><br>Ils marchent sur ton PC et sur Android.</p>${it("ok","x","Compris")}`, () => {}); return true; }
-    if(s==="fade"){ const o = [0,3,6,9,12], v = o[(o.indexOf(LS.get("fade",0))+1) % o.length]; LS.set("fade", v); if(!v) audio.volume = baseVol(); toast(v ? `Fondu enchaîné : ${v} s` : "Fondu enchaîné désactivé"); return settingsSheet(), true; }
-    if(s==="norm"){ const v = !LS.get("norm",false); LS.set("norm", v); if(v){ normOn(); toast("Volume égalisé activé"); } else { toast("Désactivé au prochain lancement d'Écho"); } return settingsSheet(), true; }
+    if(s==="fade"){ const o = [0,3,6,9,12], v = o[(o.indexOf(LS.get("fade",0))+1) % o.length]; LS.set("fade", v);
+      if(!v){ if(CAN_VOL) audio.volume = baseVol(); if(mixGain) mixGain.gain.value = 1; } else if(!CAN_VOL) graphOn();
+      toast(v ? `Fondu enchaîné : ${v} s` : "Fondu enchaîné désactivé"); return settingsSheet(), true; }
+    if(s==="norm"){ const v = !LS.get("norm",false); LS.set("norm", v); if(v) graphOn(); applyNorm(); toast(v ? "Volume égalisé activé" : "Volume égalisé désactivé"); return settingsSheet(), true; }
     if(s==="amauto"){ LS.set("amAuto", !LS.get("amAuto",true)); const on = LS.get("amAuto",true); toast(on ? (IS_DESKTOP ? "Correction de toute la bibliothèque lancée (en arrière-plan)" : "Activé — la correction tourne sur ton PC quand Écho y est ouvert") : "Correction automatique désactivée"); if(on) bgTagLoop(); return settingsSheet(), true; }
     if(s==="kb"){ LS.set("kb2", !LS.get("kb2", IS_DESKTOP)); $("#full").classList.toggle("kb", LS.get("kb2", IS_DESKTOP)); return settingsSheet(), true; }
     if(s==="kara"){ LS.set("karaoke", !LS.get("karaoke",true)); if($("#full").dataset.mode==="lyrics") showLyrics(); return settingsSheet(), true; }
@@ -5203,7 +5387,7 @@ async function uploadOne(f, prog){
 if("serviceWorker" in navigator && (location.protocol==="https:" || location.hostname==="localhost")) navigator.serviceWorker.register("sw.js").catch(()=>{});
 
 /* ============ mises à jour : sur iPhone l'app reste ouverte des jours, on vérifie à chaque retour ============ */
-const ECHO_BUILD = "2026-10-24.30";
+const ECHO_BUILD = "2026-10-25.3";
 let updPending = false, lastUpdCheck = 0;
 async function checkUpdate(){
   if(!navigator.onLine || Date.now() - lastUpdCheck < 60e3) return; lastUpdCheck = Date.now();
