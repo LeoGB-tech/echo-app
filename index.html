@@ -2508,7 +2508,7 @@ function trackSheet(id, ctx=""){
   const t = byId.get(id); if(!t) return;
   const inPl = ctx.startsWith("pl:");
   sheet(`<div class="hd">${cv(t)}<div style="min-width:0"><div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist||"Artiste inconnu")} · ${esc(albName(t))}</div></div></div>
-    ${it("next","playNext","Lire ensuite")}${it("last","playLast","Lire en dernier")}${it("addpl","addPl","Ajouter à une playlist…")}${(() => { const r = remotePeer(); return r ? it("rnext","airplay",`Lire ensuite sur ${esc(r[1].name)}`) + it("rlast","airplay",`Ajouter à la file de ${esc(r[1].name)}`) : ""; })()}
+    ${it("next","playNext","Lire ensuite")}${it("last","playLast","Lire en dernier")}${it("addpl","addPl","Ajouter à une playlist…")}${(() => { const r = remotePeer(); return r ? it("rplay","airplay",`Écouter sur ${esc(r[1].name)}`) + it("rnext","airplay",`Lire ensuite sur ${esc(r[1].name)}`) + it("rlast","airplay",`Ajouter à la file de ${esc(r[1].name)}`) : ""; })()}
     ${it("fav", t.favorite?"heart":"heartO", t.favorite?"Retirer des favoris":"Ajouter aux favoris", t.favorite?"on":"")}
     <div class="sep"></div>
     ${ctx!=="album"?it("album","album","Aller à l'album"):""}${it("artist","artist","Aller à l'artiste")}
@@ -2520,6 +2520,7 @@ function trackSheet(id, ctx=""){
     ${it("del","trash","Supprimer de la bibliothèque","danger")}`,
   (s, v) => {
     if(s==="next"){ enqueueNext([t]); toast("Lira ensuite"); }
+    if(s==="rplay") playOnPeer([t]);
     if(s==="rnext") sendToPeer("qnext", [t]);
     if(s==="rlast") sendToPeer("qlast", [t]);
     if(s==="last"){ enqueueLast([t]); toast("Ajouté à la fin de la file"); }
@@ -2553,7 +2554,7 @@ function collSheet(r){
   const l = collTracks(r); const isPl = r.startsWith("playlist:"); const pid = r.slice(9);
   const allOff = l.length && l.every(t=>offline.has(t.id));
   sheet(`<h3>${esc(routeTitle(r))}</h3>
-    ${it("next","playNext","Lire ensuite")}${it("last","playLast","Lire en dernier")}${it("addpl","addPl","Ajouter à une playlist…")}${(() => { const r = remotePeer(); return r ? it("rnext","airplay",`Lire ensuite sur ${esc(r[1].name)}`) + it("rlast","airplay",`Ajouter à la file de ${esc(r[1].name)}`) : ""; })()}
+    ${it("next","playNext","Lire ensuite")}${it("last","playLast","Lire en dernier")}${it("addpl","addPl","Ajouter à une playlist…")}${(() => { const r = remotePeer(); return r ? it("rplay","airplay",`Écouter sur ${esc(r[1].name)}`) + it("rnext","airplay",`Lire ensuite sur ${esc(r[1].name)}`) + it("rlast","airplay",`Ajouter à la file de ${esc(r[1].name)}`) : ""; })()}
     ${allOff?it("unoff","downDone","Retirer des téléchargements"):it("off","down","Télécharger sur l'appareil","",""," "+nMorceaux(l.filter(t=>!offline.has(t.id)).length))}
     ${r.startsWith("album:")?it("editalb","edit","Modifier l'album"):""}
     ${r.startsWith("artist:")?it("photo","artist","Changer la photo"):""}
@@ -2562,6 +2563,7 @@ function collSheet(r){
     ${r.startsWith("album:")?it("delalb","trash","Supprimer l'album de la bibliothèque","danger"):""}`,
   s => {
     if(s==="next"){ enqueueNext(l); toast("Lira ensuite"); }
+    if(s==="rplay") playOnPeer(l);
     if(s==="rnext") sendToPeer("qnext", l);
     if(s==="rlast") sendToPeer("qlast", l);
     if(s==="last"){ enqueueLast(l); toast("Ajouté à la fin de la file"); }
@@ -3007,7 +3009,9 @@ function next(userAct=true, skipErr){
   else { audio.pause(); audio.currentTime = 0; return; }
   load(true);
 }
-function prev(){ if(stepRadio(-1)) return; if(audio.currentTime > 3){ audio.currentTime = 0; return; } if(qi>0){ qi--; load(true); } else { audio.currentTime = 0; } }
+// avant 2 s : morceau précédent ; après : retour au début. Au début de la file : le dernier morceau de la file.
+function prev(){ if(stepRadio(-1)) return; if(!queue.length) return; if(audio.currentTime > 2){ audio.currentTime = 0; return; }
+  qi = qi > 0 ? qi - 1 : queue.length - 1; load(true); }
 function updModes(){ renderQueue(); }
 
 audio.addEventListener("ended", () => { if(CAN_FADE && LS.get("fade", 0)) fadeIn = true; next(false); });
@@ -4977,6 +4981,10 @@ function remotePeer(){
 }
 function sendToPeer(op, l){ const r = remotePeer(); if(!r) return toast("Aucun autre appareil disponible — ouvre Écho dessus");
   connSend(r[0], op, { ids: l.slice(0, 300).map(t => t.id), name: devName() }, () => toast(`Ajouté à la file de ${r[1].name}`)); }
+// lance tout de suite ces morceaux sur l'autre appareil (ce téléphone continue ce qu'il faisait)
+function playOnPeer(l){ const r = remotePeer(); if(!r) return toast("Aucun autre appareil disponible — ouvre Écho dessus");
+  const ids = l.slice(0, 300).map(t => t.id);
+  connSend(r[0], "play", { ids, cur:ids[0], pos:0, at:Date.now(), playing:true, name:devName() }, () => toast(`Lecture sur ${r[1].name}`)); }
 // ce que j'écoute, pour l'envoyer à un autre appareil (morceaux + position, ou la radio)
 function playPayload(){
   if(radioMode) return { radio:{ uuid:radioMode.uuid, name:radioMode.name, url:radioMode.url, favicon:radioMode.favicon||"", tags:radioMode.tags||"", site:radioMode.site||"" }, playing:!audio.paused, name:devName() };
@@ -5502,7 +5510,7 @@ async function uploadOne(f, prog){
 if("serviceWorker" in navigator && (location.protocol==="https:" || location.hostname==="localhost")) navigator.serviceWorker.register("sw.js").catch(()=>{});
 
 /* ============ mises à jour : sur iPhone l'app reste ouverte des jours, on vérifie à chaque retour ============ */
-const ECHO_BUILD = "2026-10-25.6";
+const ECHO_BUILD = "2026-10-25.7";
 let updPending = false, lastUpdCheck = 0;
 async function checkUpdate(){
   if(!navigator.onLine || Date.now() - lastUpdCheck < 60e3) return; lastUpdCheck = Date.now();
