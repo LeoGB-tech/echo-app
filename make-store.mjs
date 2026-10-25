@@ -12,7 +12,7 @@ fs.rmSync("_site", { recursive: true, force: true });
 fs.mkdirSync("_site/app", { recursive: true });
 for (const f of ["index.html","sw.js","manifest.webmanifest","icon.svg","icon-180.png","icon-192.png","icon-512.png"]) fs.copyFileSync(f, "_site/app/" + f);
 fs.copyFileSync("icon.png", "_site/icon.png");
-for (const f of ["oracle.html", "install-oracle.sh", "oracle-server.mjs"]) if (fs.existsSync(f)) fs.copyFileSync(f, "_site/" + f);
+for (const f of ["oracle.html", "install-oracle.sh", "oracle-server.mjs", "recorder.mjs"]) if (fs.existsSync(f)) fs.copyFileSync(f, "_site/" + f);
 
 const source = {
   name: "Store de Leo",

@@ -91,6 +91,18 @@ http.createServer(async (req, res) => {
       const out = paths.slice(0, 5000).map(p => { const f = safe(p); return f && f.rel.startsWith(uid + "/") ? { path: p, signedUrl: `/o/${f.rel.split("/").map(encodeURIComponent).join("/")}?e=${e}&s=${sig(f.rel, e)}` } : { path: p, error: "interdit" }; });
       return send(res, 200, out);
     }
+    // enregistreur radio : l'app lui donne sa clé (et peut le mettre en pause)
+    if (url.pathname === "/rec" && (req.method === "POST" || req.method === "GET")) {
+      const uid = await userOf(req); if (!uid) return send(res, 401, { error: "non autorisé" });
+      const file = path.join(DATA, ".recorder.json"); let cur = {}; try { cur = JSON.parse(await fsp.readFile(file, "utf8")); } catch {}
+      if (req.method === "GET") return send(res, 200, { linked: !!cur.key && cur.user === uid, on: cur.on !== false, installed: fs.existsSync("/opt/echo-store/recorder.mjs") });
+      const b = JSON.parse(await readBody(req) || "{}");
+      const next = { ...cur, user: uid };
+      if (b.key) next.key = String(b.key);
+      if (typeof b.on === "boolean") next.on = b.on;
+      if (Array.isArray(b.podcasts)) next.podcasts = b.podcasts.map(String).slice(0, 30);
+      await fsp.writeFile(file, JSON.stringify(next)); return send(res, 200, { ok: true, on: next.on !== false });
+    }
     if (url.pathname.startsWith("/o/")) {
       const f = safe(url.pathname.slice(3)); if (!f) return send(res, 400, { error: "chemin invalide" });
       if (req.method === "GET" || req.method === "HEAD") {

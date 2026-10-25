@@ -40,6 +40,26 @@ Restart=always
 WantedBy=multi-user.target
 ECHO_UNIT_END
 
+# 2 bis) l'enregistreur radio (écoute les radios, ajoute les nouveaux morceaux et les podcasts à ta bibliothèque)
+apt-get install -y ffmpeg
+cat > /opt/echo-store/recorder.mjs <<'ECHO_REC_END'
+__RECORDER__
+ECHO_REC_END
+cat > /etc/systemd/system/echo-recorder.service <<ECHO_UNIT2_END
+[Unit]
+Description=Echo enregistreur radio
+After=network-online.target echo-store.service
+[Service]
+User=echostore
+Nice=5
+Environment=DATA=/var/lib/echo-store SUPABASE_URL=$SUPABASE_URL SUPABASE_KEY=$SUPABASE_KEY
+ExecStart=/usr/bin/node /opt/echo-store/recorder.mjs
+Restart=always
+RestartSec=20
+[Install]
+WantedBy=multi-user.target
+ECHO_UNIT2_END
+
 # 3) adresse publique en HTTPS : <ip-avec-tirets>.sslip.io (aucun nom de domaine à acheter)
 IP=$(curl -fsS https://api.ipify.org || curl -fsS https://ifconfig.me)
 HOST="$(echo "$IP" | tr . -).sslip.io"
@@ -63,11 +83,13 @@ ROOT=$(findmnt -n -o SOURCE /); DISK=/dev/$(lsblk -no PKNAME "$ROOT" 2>/dev/null
 [ -n "$PART" ] && growpart "$DISK" "$PART" 2>/dev/null && resize2fs "$ROOT" 2>/dev/null || true
 
 systemctl daemon-reload
-systemctl enable --now echo-store
+systemctl enable --now echo-store echo-recorder
+systemctl restart echo-store echo-recorder
 systemctl restart caddy
 echo "https://$HOST" > /opt/echo-store/adresse.txt
 echo
 echo "=============================================="
 echo " Écho Store est prêt :  https://$HOST"
 echo " Dans Écho → Réglages → Stockage Oracle, colle : $IP"
+echo " Puis dans Écho → Radio → Enregistreur radio → Activer"
 echo "=============================================="
