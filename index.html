@@ -188,7 +188,8 @@ main#view{max-width:1100px;margin:0 auto;padding:0 16px}
 .row .rm{color:var(--red)}
 .handle{width:34px;height:34px;display:grid;place-items:center;color:var(--mute);touch-action:none;cursor:grab;flex-shrink:0}
 .handle svg{width:18px;height:18px}
-.row.dragging{background:var(--card2);box-shadow:0 10px 30px rgba(0,0,0,.4);opacity:.95}
+.row.dragging{background:var(--card2);box-shadow:0 10px 30px rgba(0,0,0,.25);transform:scale(1.02);z-index:5;position:relative;border-radius:10px}
+#queuePanel .row.dragging{background:rgba(255,255,255,.14);box-shadow:0 10px 30px rgba(0,0,0,.35)}
 .eq{display:flex;gap:2px;align-items:flex-end;height:16px}
 .eq i{width:3px;background:var(--a2);border-radius:2px;animation:eq 1s infinite ease-in-out}
 .eq i:nth-child(2){animation-delay:-.4s}.eq i:nth-child(3){animation-delay:-.7s}
@@ -349,14 +350,12 @@ html.native #sbar{display:none}
 .row.sw{overflow:hidden;position:relative}
 .row.sw > *:not(.swk){transform:translateX(var(--sx,0px))}
 .row.swanim > *:not(.swk),.row.swanim .swk{transition:transform .2s ease,width .2s ease}
-.swk{position:absolute;left:0;top:0;bottom:0;width:var(--sx,0px);display:flex;overflow:hidden;z-index:1}
-.swk button{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:#fff;font-size:11px;font-weight:600;background:#5856d6;white-space:nowrap;transition:flex .18s ease}
-.swk button:nth-child(2){background:#7d7aff}
-.swk button.lst{background:#ff9500}
-.swk svg{width:20px;height:20px}
-.swk span{max-width:100%;padding:0 4px;white-space:normal;text-align:center;line-height:1.15}
-.row.swfull .swk button:not(.lst){flex:0 0 0;padding:0}
-.row.swfull .swk button.lst{flex:1 1 100%}
+.swk{position:absolute;left:0;top:0;bottom:0;width:var(--sx,0px);display:flex;align-items:center;gap:12px;padding-left:14px;overflow:hidden;z-index:1}
+.swk button{width:44px;height:44px;flex:none;border-radius:50%;display:grid;place-items:center;color:#fff;transition:transform .18s ease,opacity .18s}
+.swk button svg{width:20px;height:20px}
+.swk button.lst{background:#ff9500}.swk button.nxt{background:#8e5cf7}
+.row.swfull .swk button.nxt{opacity:0;transform:scale(.6)}
+.row.swfull .swk button.lst{transform:scale(1.12)}
 .seek{margin-top:6px}
 input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:6px;outline:none;cursor:pointer;
   background:linear-gradient(90deg,rgba(255,255,255,.9) var(--p,0%),rgba(255,255,255,.2) var(--p,0%))}
@@ -1177,8 +1176,12 @@ const applyStats = rows => {
 async function enter(){
   if(!(await chooseProfile())) return;
   show("app"); setTab(LS.get("tab","home"), true);
-  const ok = await loadAll();
+  // démarrage instantané : la bibliothèque enregistrée sur l'appareil s'affiche tout de suite,
+  // puis seuls les changements (nouveaux sons, favoris…) sont récupérés en arrière-plan
+  const quick = await quickStart();
+  const ok = quick || await loadAll();
   if(ok === "migrate"){ show("migrate"); return; }
+  if(quick) setTimeout(refreshInBackground, 600);
   restorePlayer();
   setTimeout(() => refreshNotifs(false), 2500);
   setTimeout(() => prefetchTops(), 4000);
@@ -1267,6 +1270,49 @@ setInterval(() => { if(!document.hidden) syncLibrary(); }, 60000);
     el.classList.remove("spin", "go"); el.style.opacity = 0; el.style.transform = "translate(-50%, 0)"; pulled = 0;
   });
 })();
+async function quickStart(){
+  try{
+    if(!navigator.onLine || LS.get("cacheProfile", null) !== PROFILE?.id) return false;
+    const c = await readCache(); if(!c?.tracks?.length || Date.now() - (c.at||0) > 14*864e5) return false;
+    tracks = c.tracks; playlists = c.playlists||[]; plItems = c.plItems||[]; notifs = c.notifs||[]; radioFavs = c.radioFavs||[];
+    if(c.artOv) artOv = new Map(c.artOv);
+    if(c.urls && Date.now() - (c.urlsAt || c.at || 0) < 10*3600e3){ Object.assign(urls, c.urls); urlsAt = c.urlsAt || c.at; } else urlsAt = 0;
+    ORA = LS.get("ora", null); offlineMode = false;
+    loaded = true; rebuild(); render(); return true;
+  }catch{ return false; }
+}
+// après un démarrage instantané : on rattrape ce qui a changé, sans bloquer
+async function refreshInBackground(){
+  try{
+    lastSyncAt = 0; await syncLibrary(false);
+    const [p, pi, ts, nt, rf, us, ai] = await within(Promise.all([
+      fetchAll("playlists", "*", "updated_at", false, q => q.eq("profile_id", PROFILE.id)),
+      fetchAll("playlist_tracks", "*", "position", true),
+      fetchAll("track_stats", "track_id,favorite,play_count,last_played", "track_id", true, q => q.eq("profile_id", PROFILE.id)),
+      sb.from("notifications").select("*").or(`profile_id.is.null,profile_id.eq.${PROFILE.id}`).order("created_at",{ascending:false}).limit(120),
+      sb.from("radio_favs").select("*").eq("profile_id", PROFILE.id).order("created_at",{ascending:false}),
+      sb.from("user_settings").select("oracle_url").maybeSingle(),
+      sb.from("artist_images").select("*"),
+    ]), 20000);
+    const before = JSON.stringify([playlists.length, plItems.length, tracks.filter(t=>t.favorite).length]);
+    if(!p.error) playlists = p.data;
+    if(!pi.error){ const plIds = new Set(playlists.map(x=>x.id)); plItems = pi.data.filter(x=>plIds.has(x.playlist_id)); }
+    if(!ts.error) applyStats(ts.data || []);
+    if(!nt.error) notifs = nt.data || [];
+    if(!rf.error) radioFavs = rf.data || [];
+    if(!us.error){ ORA = us.data?.oracle_url || null; LS.set("ora", ORA); }
+    if(!ai.error){ artOv = new Map(ai.data.map(x=>[x.name, x])); LS.set("artOv", [...artOv]); }
+    // pochettes : liens neufs seulement s'ils ont expiré
+    if(!urlsAt || Date.now() - urlsAt > 10*3600e3){
+      const paths = [...new Set(tracks.map(t => t.cover_path).filter(Boolean))]; artOv.forEach(o => { if(o.image_path) paths.push(o.image_path); });
+      Object.assign(urls, await signPaths(paths)); urlsAt = Date.now();
+    }
+    rebuild(); saveCache(); flushOutbox();
+    const after = JSON.stringify([playlists.length, plItems.length, tracks.filter(t=>t.favorite).length]);
+    if(before !== after || !document.querySelector("#view .cv")){ const y = scrollY; render(); requestAnimationFrame(() => scrollTo(0, y)); }
+    else document.querySelectorAll("[data-artimg]").length && loadArtistImages();
+  }catch(e){ console.warn("rafraîchissement", e); }
+}
 async function loadAll(){
   try{
     if(!navigator.onLine) throw new Error("offline");
@@ -1295,7 +1341,7 @@ async function loadAll(){
     { const meta = {}; const keep = ["id","title","artist","album","album_artist","duration","path","cover_path","cover_url","genre","year","track_no","disc_no","parts","size","created_at","favorite","play_count"];
       tracks.forEach(t => { if(offline.has(t.id)){ const o = {}; keep.forEach(k => o[k] = t[k]); meta[t.id] = o; } }); LS.set("offMeta", meta); }
     await signAll(true);
-    saveCache(); flushOutbox();
+    LS.set("cacheProfile", PROFILE.id); saveCache(); flushOutbox();
   }catch(e){
     // sans réseau : bibliothèque enregistrée, sinon au moins les titres téléchargés
     const c = await readCache() || LS.get("cache", null) || { tracks: Object.values(LS.get("offMeta", {})) };
@@ -1325,7 +1371,7 @@ async function saveCacheNow(){
     try{
       const keep = {}; for(const [k, v] of Object.entries(urls)) if(/\/(covers|artists)\//.test(k) && !String(v).startsWith("blob:")) keep[k] = v;
       const c = await caches.open(DATA_C);
-      await c.put(dataKey(), new Response(JSON.stringify({ at:Date.now(), tracks, playlists, plItems, notifs, radioFavs, artOv:[...artOv], urls:keep }), { headers:{ "Content-Type":"application/json" } }));
+      await c.put(dataKey(), new Response(JSON.stringify({ at:Date.now(), urlsAt, tracks, playlists, plItems, notifs, radioFavs, artOv:[...artOv], urls:keep }), { headers:{ "Content-Type":"application/json" } }));
       try{ localStorage.removeItem("echo.cache"); }catch{}
     }catch{}
   }
@@ -2371,7 +2417,7 @@ document.addEventListener("touchend", e => { clearTimeout(lpT); const row=e.targ
 /* ---- glisser un morceau vers la droite, comme sur Apple Music :
    un peu → « Lire ensuite » (début de la file) ou « Après le suivant » ; jusqu'au bout → « Lire en dernier » (fin de la file) ---- */
 let sw = null, swOpen = null, swJust = 0;
-const SW_W = 216;
+const SW_W = 124;
 function swClose(row){ if(!row) return; row.classList.add("swanim"); row.style.setProperty("--sx", "0px"); row.classList.remove("swfull"); setTimeout(() => { row.classList.remove("sw", "swanim"); row.querySelector(".swk")?.remove(); }, 220); if(swOpen === row) swOpen = null; }
 function swDo(row, where){
   const t = byId.get(row.dataset.id); swClose(row); if(!t) return;
@@ -2397,7 +2443,7 @@ document.addEventListener("touchmove", e => {
   if(!sw.lock){
     if(dx > 12 && Math.abs(dx) > Math.abs(dy) * 1.4){
       sw.lock = "h"; clearTimeout(lpT); const r = sw.row; r.classList.add("sw");
-      if(!r.querySelector(".swk")) r.insertAdjacentHTML("afterbegin", `<div class="swk"><button data-sw="next">${ICON.playNext}<span>Lire ensuite</span></button><button data-sw="after">${ICON.playNext}<span>Après le suivant</span></button><button class="lst" data-sw="last">${ICON.playLast}<span>Lire en dernier</span></button></div>`);
+      if(!r.querySelector(".swk")) r.insertAdjacentHTML("afterbegin", `<div class="swk"><button class="lst" data-sw="last" aria-label="Lire en dernier">${ICON.playLast}</button><button class="nxt" data-sw="next" aria-label="Lire ensuite">${ICON.playNext}</button></div>`);
     } else if(Math.abs(dy) > 10 || dx < -12){ sw = null; return; }
     else return;
   }
@@ -2780,19 +2826,35 @@ async function deletePlaylist(pid){
 function sortable(list, onEnd){
   if(!list) return;
   list.querySelectorAll(".handle").forEach(h => h.onpointerdown = e => {
-    e.preventDefault();
-    const row = h.closest(".row"); row.classList.add("dragging"); h.setPointerCapture(e.pointerId);
-    const scroller = list.closest(".fpanel");
-    const move = ev => {
-      const y = ev.clientY;
-      const sibs = [...list.querySelectorAll(".row")].filter(r=>r!==row);
-      const after = sibs.find(r => { const b = r.getBoundingClientRect(); return y < b.top + b.height/2; });
-      after ? list.insertBefore(row, after) : list.appendChild(row);
-      const area = scroller ? scroller.getBoundingClientRect() : { top:60, bottom:innerHeight-140 };
-      if(y < area.top + 40) (scroller||window).scrollBy(0,-12); else if(y > area.bottom - 40) (scroller||window).scrollBy(0,12);
+    if(e.button > 0) return;
+    e.preventDefault(); e.stopPropagation();
+    // on écoute la fenêtre entière : sur iPhone, déplacer la ligne fait perdre le doigt à la poignée
+    list.querySelectorAll(".row.dragging").forEach(r => r.classList.remove("dragging"));
+    const row = h.closest(".row"); row.classList.add("dragging"); navigator.vibrate?.(6);
+    const scroller = list.closest(".fpanel"); let lastY = e.clientY, raf = 0, moved = false;
+    const place = () => {
+      const sibs = [...list.querySelectorAll(".row")].filter(r => r !== row);
+      const after = sibs.find(r => { const bb = r.getBoundingClientRect(); return lastY < bb.top + bb.height/2; });
+      if(after){ if(row.nextElementSibling !== after){ list.insertBefore(row, after); moved = true; } }
+      else if(list.lastElementChild !== row){ list.appendChild(row); moved = true; }
     };
-    const up = () => { row.classList.remove("dragging"); h.removeEventListener("pointermove", move); h.removeEventListener("pointerup", up); h.removeEventListener("pointercancel", up); onEnd(); };
-    h.addEventListener("pointermove", move); h.addEventListener("pointerup", up); h.addEventListener("pointercancel", up);
+    const tick = () => { // défilement automatique près des bords
+      const area = scroller ? scroller.getBoundingClientRect() : { top:70, bottom:innerHeight-150 };
+      const sp = lastY < area.top + 50 ? -10 : lastY > area.bottom - 50 ? 10 : 0;
+      if(sp){ (scroller||window).scrollBy(0, sp); place(); }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const move = ev => { if(ev.pointerId !== e.pointerId) return; ev.preventDefault(); lastY = ev.clientY; place(); };
+    const block = ev => ev.preventDefault();
+    const up = ev => {
+      if(ev && ev.pointerId !== undefined && ev.pointerId !== e.pointerId) return;
+      cancelAnimationFrame(raf); row.classList.remove("dragging");
+      removeEventListener("pointermove", move); removeEventListener("pointerup", up); removeEventListener("pointercancel", up); removeEventListener("touchmove", block);
+      if(moved) onEnd();
+    };
+    addEventListener("pointermove", move, { passive:false }); addEventListener("pointerup", up); addEventListener("pointercancel", up);
+    addEventListener("touchmove", block, { passive:false }); // pas de défilement de la page pendant qu'on déplace
   });
 }
 
@@ -2800,6 +2862,7 @@ function sortable(list, onEnd){
 const offKey = id => `https://echo.offline/${id}`;
 const MIME = { mp3:"audio/mpeg", flac:"audio/flac", m4a:"audio/mp4", aac:"audio/aac", wav:"audio/wav", ogg:"audio/ogg", opus:"audio/ogg", webm:"audio/webm" };
 async function downloadOne(t, onProg){
+  try{ if(!downloadOne.p){ downloadOne.p = 1; navigator.storage?.persist?.(); } }catch{} // l'iPhone ne doit pas effacer les téléchargements pour faire de la place
   const c = await caches.open(OFFC);
   const r = await fetch(await fileUrl(t)); if(!r.ok) throw new Error("HTTP "+r.status);
   const total = +r.headers.get("content-length") || t.size || 0; const reader = r.body.getReader(); const parts = []; let got = 0;
@@ -2893,7 +2956,8 @@ async function offlineSrc(t){
 }
 
 /* ============ playback ============ */
-let objUrl = null, counted = false, startedFor = null, restorePos = 0;
+// restorePos ne vaut QUE pour le morceau restoreId (sinon le morceau suivant démarrait à la position de l'ancien)
+let objUrl = null, counted = false, startedFor = null, restorePos = 0, restoreId = null, srcFor = null;
 let playCtx = null;
 // morceaux ajoutés à la main (« Lire ensuite » / « Plus tard ») : comme Apple Music, on demande avant de les effacer
 let userQ = new Set();
@@ -2936,7 +3000,7 @@ async function load(autoplay, metaOnly){
       if(!urls[(t.parts||1) > 1 ? partPath(t,0) : t.path] || Date.now()-urlsAt > 10*3600e3){
         const ps = (t.parts||1) > 1 ? Array.from({length:t.parts},(_,i)=>partPath(t,i)) : [t.path];
         Object.assign(urls, await signPaths(ps));
-        if(Date.now()-urlsAt > 10*3600e3) setTimeout(() => signAll(true), 5000);
+        // (les pochettes sont re-signées en arrière-plan au démarrage, pas besoin de tout re-signer ici)
       }
       if((t.parts||1) > 1){
         let shown = -1; const tid = t.id;
@@ -2946,7 +3010,8 @@ async function load(autoplay, metaOnly){
       } else src = urls[t.path];
     }
     stopRadioMode();
-    audio.src = src;
+    seekTarget = null; if(restoreId !== t.id){ restorePos = 0; restoreId = null; }
+    audio.src = src; srcFor = t.id;
     startPlay({ track_id:t.id, source:playCtx });
     if(autoplay) playNow(t);
   }
@@ -2982,7 +3047,7 @@ async function retryTrack(id){
   const t = queue[qi]; if(!t || t.id !== id || radioMode) return;
   if(playTry.id === id && playTry.n >= 2){ wantPlay = false; toast("Ce morceau ne se lance pas — passe au suivant"); return; }
   playTry = { id, n:(playTry.id === id ? playTry.n : 0) + 1 };
-  const pos = audio.currentTime || restorePos || 0;
+  const pos = (srcFor === id ? audio.currentTime : 0) || (restoreId === id ? restorePos : 0) || 0;
   try{
     if(offline.has(t.id)){ const s2 = await offlineSrc(t); if(s2){ objUrl = s2; audio.src = s2; } }
     else if((t.parts||1) > 1){ const ps = Array.from({length:t.parts},(_,i)=>partPath(t,i)); Object.assign(urls, await signPaths(ps)); audio.src = await partsBlobUrl(t, () => {}); }
@@ -3035,6 +3100,7 @@ function showTimes(){ if(seeking) return; const d = curDur(), c = audio.currentT
 setInterval(() => { if(!audio.paused && !document.hidden) showTimes(); }, 500);
 ["loadedmetadata","durationchange","seeked","emptied"].forEach(ev => audio.addEventListener(ev, showTimes));
 audio.addEventListener("timeupdate", () => {
+  if(!radioMode && srcFor && queue[qi] && srcFor !== queue[qi].id) return; // l'ancien morceau joue encore pendant le chargement du nouveau
   if(curPlay && !audio.paused){ const now = audio.currentTime, dt = now - (curPlay.lastT ?? now); if(dt > 0 && dt < 2) curPlay.secs += dt; curPlay.lastT = now; if(curPlay.secs - curPlay.saved >= 30) savePlay(); }
   const t = queue[qi]; const d = curDur(), c = audio.currentTime || 0;
   const pct = d ? Math.min(100, c/d*100) : 0;
@@ -3047,7 +3113,7 @@ audio.addEventListener("timeupdate", () => {
   if(Date.now()-lastSave > 5000){ lastSave = Date.now(); saveState(); }
 });
 audio.addEventListener("loadedmetadata", () => {
-  const ct = queue[qi]; if(ct && isFinite(audio.duration) && (!ct.duration || Math.abs(ct.duration - audio.duration) > 2) && !offlineMode) upd(ct.id, { duration: audio.duration }); if(restorePos){ seekTarget = restorePos; restorePos = 0; try{ audio.currentTime = seekTarget; }catch{} } });
+  const ct = queue[qi]; if(ct && isFinite(audio.duration) && (!ct.duration || Math.abs(ct.duration - audio.duration) > 2) && !offlineMode) upd(ct.id, { duration: audio.duration }); if(restorePos && restoreId === srcFor){ seekTarget = restorePos; try{ audio.currentTime = seekTarget; }catch{} } restorePos = 0; restoreId = null; });
 // Safari ignore parfois la position tant que le son n'a pas démarré : on la réapplique dès qu'il peut lire
 let seekTarget = null;
 ["canplay","playing"].forEach(ev => audio.addEventListener(ev, () => {
@@ -3067,7 +3133,18 @@ audio.addEventListener("error", async () => {
   { const br = new Set(LS.get("broken", [])); br.add(t.id); LS.set("broken", [...br]); }
 });
 $("#seek").addEventListener("input", e => { seeking = true; clearTimeout(seekT); seekT = setTimeout(seekDone, 2500); const v=e.target.value/10; e.target.style.setProperty("--p", v+"%"); const d=curDur(); $("#cur").textContent = fmt(d*v/100); $("#dur").textContent = "-"+fmt(d-d*v/100); });
-function seekDone(){ if(!seeking) return; clearTimeout(seekT); seeking = false; const d = curDur(); if(d){ try{ audio.currentTime = d*$("#seek").value/1000; }catch{} } showTimes(); }
+let seekMuteT = 0;
+function seekTo(t){
+  t = Math.max(0, +t || 0);
+  if(!audio.paused && !radioMode){
+    audio.muted = true; clearTimeout(seekMuteT);
+    const un = () => { clearTimeout(seekMuteT); seekMuteT = setTimeout(() => { audio.muted = false; }, 120); };
+    audio.addEventListener("seeked", un, { once:true }); seekMuteT = setTimeout(() => { audio.muted = false; }, 2500);
+  }
+  seekTarget = null; clearTimeout(playWD); // un saut volontaire n'est pas un « morceau bloqué »
+  try{ audio.currentTime = t; }catch{}
+}
+function seekDone(){ if(!seeking) return; clearTimeout(seekT); seeking = false; const d = curDur(); if(d){ seekTo(d*$("#seek").value/1000); } showTimes(); }
 $("#seek").addEventListener("change", seekDone);
 ["pointerup","touchend","touchcancel","pointercancel","blur"].forEach(ev => $("#seek").addEventListener(ev, () => setTimeout(seekDone, 30)));
 $("#vol").addEventListener("input", e => { audio.volume = e.target.value/100; e.target.style.setProperty("--p", e.target.value+"%"); LS.set("vol", +e.target.value); });
@@ -3104,7 +3181,7 @@ function graphOn(){
     normComp.attack.value = .005; normComp.release.value = .3; applyNorm();
     src.connect(normComp).connect(normGain).connect(mixGain).connect(actx.destination);
     actx.onstatechange = () => { if(actx.state !== "running" && !audio.paused) actx.resume().catch(()=>{}); };
-    if(src0 && needReload){ audio.src = src0; restorePos = pos; if(playing) audio.play().catch(()=>{}); }
+    if(src0 && needReload){ audio.src = src0; restorePos = pos; restoreId = srcFor; if(playing) audio.play().catch(()=>{}); }
   }catch(e){ console.warn(e); }
 }
 const normOn = graphOn;
@@ -3195,7 +3272,7 @@ if("mediaSession" in navigator){
   const ms = navigator.mediaSession;
   ms.setActionHandler("play", ()=>audio.play()); ms.setActionHandler("pause", ()=>audio.pause());
   ms.setActionHandler("nexttrack", ()=>next(true)); ms.setActionHandler("previoustrack", prev);
-  try{ ms.setActionHandler("seekto", d=>{ audio.currentTime = d.seekTime; }); }catch{}
+  try{ ms.setActionHandler("seekto", d=>{ seekTo(d.seekTime); }); }catch{}
   try{ ms.setActionHandler("seekbackward", null); ms.setActionHandler("seekforward", null); }catch{}
   try{ ms.setActionHandler("stop", ()=>{ audio.pause(); }); }catch{}
 }
@@ -3225,14 +3302,14 @@ function savePlay(){
 function saveState(){
   if(!queue.length) return;
   const from = Math.max(0, qi - 100);
-  LS.set("player", { q:queue.slice(from, from + 600).map(t=>t.id), b:baseList.slice(0, 2000).map(t=>t.id), qi: qi - from, pos:audio.currentTime||0, shuffle, repeat });
+  LS.set("player", { q:queue.slice(from, from + 600).map(t=>t.id), b:baseList.slice(0, 2000).map(t=>t.id), qi: qi - from, pos: srcFor === queue[qi]?.id ? (audio.currentTime||0) : 0, shuffle, repeat });
 }
 function restorePlayer(){
   const s = LS.get("player", null); if(!s || queue.length) return;
   queue = s.q.map(id=>byId.get(id)).filter(Boolean); baseList = (s.b||s.q).map(id=>byId.get(id)).filter(Boolean);
   if(!queue.length) return;
   qi = Math.min(Math.max(0, s.qi), queue.length-1); shuffle = !!s.shuffle; repeat = s.repeat||0;
-  restorePos = s.pos||0; updModes(); load(false);
+  restorePos = s.pos||0; restoreId = queue[qi]?.id || null; updModes(); load(false);
 }
 
 /* ============ full-player modes ============ */
@@ -3355,7 +3432,7 @@ function syncLyrics(c, force){
   lyrIdx = i; const p = el.querySelector(`p[data-i="${i}"]`);
   if(p){ p.classList.add("on"); if(Date.now()-lyrUserScroll > 3000) el.scrollTo({ top: p.offsetTop - el.clientHeight*0.3, behavior: force?"auto":"smooth" }); }
 }
-$("#lyrics").addEventListener("click", e => { const p = e.target.closest("p[data-i]"); if(p && lyr?.synced){ audio.currentTime = Math.max(0, lyr.lines[+p.dataset.i].t - lyrOffset(queue[qi]) + 0.05); lyrUserScroll = 0; audio.paused && audio.play(); } });
+$("#lyrics").addEventListener("click", e => { const p = e.target.closest("p[data-i]"); if(p && lyr?.synced){ seekTo(lyr.lines[+p.dataset.i].t - lyrOffset(queue[qi]) + 0.05); lyrUserScroll = 0; audio.paused && audio.play(); } });
 ["wheel","touchmove"].forEach(ev => $("#lyrics").addEventListener(ev, () => lyrUserScroll = Date.now(), { passive:true }));
 
 /* ============ radio ============ */
@@ -4894,7 +4971,7 @@ function connState(){
   const t = queue[qi];
   return { from:TAB_ID, dev:DEV_ID, name:devName(), who:PROFILE?.name||"", emoji:PROFILE?.emoji||"", color:PROFILE?.color||"",
     t: radioMode ? { title:radioMode.name, artist: radioMeta || "Radio en direct", radio:{ uuid:radioMode.uuid, name:radioMode.name, url:radioMode.url, favicon:radioMode.favicon||"", tags:radioMode.tags||"", site:radioMode.site||"" } } : t ? { id:t.id, title:t.title, artist:t.artist||"", album:t.album||"", dur:audio.duration||t.duration||0 } : null,
-    playing: !audio.paused, pos: audio.currentTime||0, at: Date.now(), vol: baseVol(), canVol: CAN_VOL, mobile: !IS_DESKTOP, visible: !document.hidden,
+    playing: !audio.paused, pos: (radioMode || srcFor === queue[qi]?.id) ? (audio.currentTime||0) : 0, at: Date.now(), vol: baseVol(), canVol: CAN_VOL, mobile: !IS_DESKTOP, visible: !document.hidden,
     q: radioMode ? [] : queue.slice(qi+1, qi+41).map(t => t.id), qn: radioMode ? 0 : Math.max(0, queue.length - qi - 1) };
 }
 function connTrack(now){
@@ -4947,7 +5024,7 @@ function onConnCmd(m){
   if(m.op === "toggle") return toggle();
   if(m.op === "next") return next(true);
   if(m.op === "prev") return prev();
-  if(m.op === "seek"){ try{ audio.currentTime = Math.max(0, +m.v || 0); }catch{} connTrack(true); return; }
+  if(m.op === "seek"){ seekTo(m.v); connTrack(true); return; }
   if(m.op === "vol"){ const v = Math.max(0, Math.min(1, +m.v)); LS.set("vol", Math.round(v*100)); audio.volume = v; const r = $("#vol"); if(r){ r.value = Math.round(v*100); r.style.setProperty("--p", r.value+"%"); } connTrack(true); return; }
   if(m.op === "pause"){ audio.pause(); return; }
   if(m.op === "qnext" || m.op === "qlast"){ // ajout à ma file depuis un autre appareil (sans couper ce qui joue)
@@ -4965,7 +5042,7 @@ function onConnCmd(m){
     if(radioMode) stopRadioMode();
     baseList = [...list]; queue = [...list]; qi = Math.max(0, list.findIndex(t => t.id === m.cur));
     // la position envoyée + le temps écoulé pendant le transfert
-    restorePos = (m.pos || 0) + (m.at ? Math.min(10, Math.max(0, (Date.now() - m.at) / 1000)) : 0);
+    restorePos = (m.pos || 0) + (m.at ? Math.min(10, Math.max(0, (Date.now() - m.at) / 1000)) : 0); restoreId = queue[qi]?.id || null;
     Promise.resolve(load(m.playing !== false)).then(() => setTimeout(() => { if(audio.paused && m.playing !== false) tapToPlay(m.name); }, 900));
     toast(m.playing === false ? `File reçue de ${m.name||"un autre appareil"} — appuie sur lecture quand tu veux` : `Lecture reprise depuis ${m.name||"un autre appareil"}`); return;
   }
@@ -4989,7 +5066,7 @@ function playOnPeer(l){ const r = remotePeer(); if(!r) return toast("Aucun autre
 function playPayload(){
   if(radioMode) return { radio:{ uuid:radioMode.uuid, name:radioMode.name, url:radioMode.url, favicon:radioMode.favicon||"", tags:radioMode.tags||"", site:radioMode.site||"" }, playing:!audio.paused, name:devName() };
   const t = queue[qi]; if(!t) return null;
-  return { ids: queue.slice(Math.max(0, qi-50), qi+200).map(x => x.id), cur:t.id, pos:audio.currentTime, at:Date.now(), playing:!audio.paused, name:devName() };
+  return { ids: queue.slice(Math.max(0, qi-50), qi+200).map(x => x.id), cur:t.id, pos: srcFor === t.id ? audio.currentTime : 0, at:Date.now(), playing:!audio.paused, name:devName() };
 }
 // iPhone : un site ne peut lancer le son qu'après un geste. On « déverrouille » le lecteur au premier toucher,
 // et si ça bloque quand même, un gros bouton propose de lancer la lecture.
@@ -5510,7 +5587,7 @@ async function uploadOne(f, prog){
 if("serviceWorker" in navigator && (location.protocol==="https:" || location.hostname==="localhost")) navigator.serviceWorker.register("sw.js").catch(()=>{});
 
 /* ============ mises à jour : sur iPhone l'app reste ouverte des jours, on vérifie à chaque retour ============ */
-const ECHO_BUILD = "2026-10-25.7";
+const ECHO_BUILD = "2026-10-26.5";
 let updPending = false, lastUpdCheck = 0;
 async function checkUpdate(){
   if(!navigator.onLine || Date.now() - lastUpdCheck < 60e3) return; lastUpdCheck = Date.now();
